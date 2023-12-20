@@ -18,6 +18,9 @@ whatshap="singularity exec --bind /home/proj/ singularity/whatshap_2.1--py39h1f9
 trgt="singularity exec --bind /home/proj/ singularity/trgt_0.4.0.sif trgt"
 trgt_repeats="reeats_hg19.bed"
 
+vep="singularity exec --bind /home/proj/ singularity/ensembl-vep_107.0--pl5321h4a94de4_0.sif vep"
+vep_options="--af_gnomadg --af_1kg --assembly GRCh37 --dir_cache /home/proj/production/rare-disease/references/references_11.0/ensembl-tools-release-107/cache/ --sift b --symbol --hgvs --clin_sig_allele 1 --polyphen b --merged --offline --plugin SpliceAI,snv=/home/proj/production/rare-disease/references/references_12.0/grch37_spliceai_scores_raw_snv_-v1.3-.vcf.gz,indel=/home/proj/production/rare-disease/references/references_12.0/grch37_spliceai_scores_raw_indel_-v1.3-.vcf.gz --plugin CADD,databases/whole_genome_SNVs.tsv.gz,databases/InDels.tsv.gz --plugin dbNSFP,/home/proj/production/rare-disease/references/references_12.0/grch37_dbnsfp_-v3.5a-.txt.gz,ALL"
+
 ref="/home/proj/production/rare-disease/references/references_12.0/grch37_homo_sapiens_-d5-.fasta"
 
 #{samtools} merge -f {prefix}/{prefix}.bam {input_folder}/*bam
@@ -75,7 +78,7 @@ TMPDIR={sample}/tmp/
 def bcftools_concat(sample,bcftools):
 
 	bcftools_cmd=f"""
-{bcftools} concat {sample}/{sample}/dv.*vcf | {bcftools} sort -O z - --temp-dir {sample}/tmp/ > {sample}/{sample}.vcf.gz
+{bcftools} concat {sample}/{sample}/dv.*vcf | grep -v RefCall | {bcftools} sort -O z - --temp-dir {sample}/tmp/ > {sample}/{sample}.vcf.gz
 {bcftools} index {sample}/{sample}.vcf.gz
 {bcftools} stats {sample}/{sample}.vcf.gz > {sample}/{sample}.txt
 	
@@ -109,6 +112,12 @@ def multiqc_collect(sample,multiqc):
 	cmd=f"{multiqc} {sample} --outdir {sample}"
 	return(cmd)
 
+def vep_annotation(sample,in_vcf,out_vcf,vep,vep_options,bcftools):
+	cmd=f"""
+{vep} --offline --cache -i {in_vcf} -o {out_vcf} --stats_file {sample}/{sample}.variant_effect_output.txt_summary.html --force_overwrite --fork 16 --vcf {vep_options}
+{bcftools} index {out_vcf}
+"""
+	return(cmd)
 
 def main():
 
@@ -183,6 +192,10 @@ def main():
 	print(whatshap_haplotag_cmd)
 	whatshap_haplotag_job=Slurm("whatshap_haplotag", {"account": account, "ntasks": "4","time":"1-00:00:00","dependency":f"afterok:{whatshap_phase_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	whatshap_haplotag_job_id=whatshap_haplotag_job.run(whatshap_haplotag_cmd)
+
+	vep_cmd=vep_annotation(sample,f"{sample}/{sample}.whatshap.vcf.gz",f"{sample}/{sample}.vcf.gz",vep,vep_options,bcftools)
+	vep_job=Slurm("vep_annotation", {"account": account, "ntasks": "16","time":"1-00:00:00","dependency":f"afterok:{whatshap_phase_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	vep_job_id=vep_job.run(vep_cmd)
 
 	nanostats_cmd=nanostats_qc(bam,sample,nanostats)
 	print(nanostats_cmd)
