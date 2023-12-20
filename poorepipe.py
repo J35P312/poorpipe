@@ -54,7 +54,7 @@ def target_type(bam,sample,ref,trgt_repeats,trgt):
 	return(cmd)
 
 def picard_qc(bam,sample,ref,picard):
-	cmd=f"{picard} CollectWgsMetrics --INPUT {bam} --OUTPUT {sample}/{sample}.wgsmetrics.txt --REFERENCE_SEQUENCE {ref} --COUNT_UNPAIRED true --MINIMUM_BASE_QUALITY 1 --VALIDATION_STRINGENCY SILENT"
+	cmd=f"{picard}  -Xmx20G CollectWgsMetrics --INPUT {bam} --OUTPUT {sample}/{sample}.wgsmetrics.txt --REFERENCE_SEQUENCE {ref} --COUNT_UNPAIRED true --MINIMUM_BASE_QUALITY 1 --VALIDATION_STRINGENCY SILENT"
 	return(cmd)
 
 def cnvpytor_call(bam,sample,ref,pytor):
@@ -67,13 +67,15 @@ def cnvpytor_call(bam,sample,ref,pytor):
 	return(cmd)
 
 def deepvariant_call_chr(bam,sample,ref,deepvariant,chromosome):
-	cmd=f"{deepvariant} run_deepvariant --output_vcf {sample}/{sample}/dv.{chromosome}.vcf --model_type ONT_R104 --num_shards 16 --reads {bam} --ref {ref} --regions {chromosome}"
+	cmd=f"""
+TMPDIR={sample}/tmp/
+{deepvariant} run_deepvariant --output_vcf {sample}/{sample}/dv.{chromosome}.vcf --model_type ONT_R104 --num_shards 16 --reads {bam} --ref {ref} --regions {chromosome} --intermediate_results_dir {sample}/tmp/{chromosome}"""
 	return(cmd)
 
 def bcftools_concat(sample,bcftools):
 
 	bcftools_cmd=f"""
-{bcftools} concat {sample}/{sample}/dv.*vcf | {bcftools} sort -O z - > {sample}/{sample}.vcf.gz
+{bcftools} concat {sample}/{sample}/dv.*vcf | {bcftools} sort -O z - --temp-dir {sample}/tmp/ > {sample}/{sample}.vcf.gz
 {bcftools} index {sample}/{sample}.vcf.gz
 {bcftools} stats {sample}/{sample}.vcf.gz > {sample}/{sample}.txt
 	
@@ -100,7 +102,7 @@ def nanostats_qc(bam,sample,nanostats):
 	return(cmd)
 
 def fastqc_qc(sample,fastqc):
-	cmd=f"{fastqc} --memory 5000 -t 16 -o {sample} {sample}/{sample}.fastq.gz"
+	cmd=f"{fastqc} --memory 5000 -t 16 -o {sample} {sample}/{sample}.fastq.gz --dir {sample}/tmp/"
 	return(cmd)
 
 def multiqc_collect(sample,multiqc):
@@ -121,6 +123,7 @@ def main():
 		os.system(f"mkdir {sample}/whatshap")
 		os.system(f"mkdir {sample}/scripts")
 		os.system(f"mkdir {sample}/fastq")
+		os.system(f"mkdir {sample}/tmp")
 
 	except:
 		pass
@@ -183,7 +186,7 @@ def main():
 
 	nanostats_cmd=nanostats_qc(bam,sample,nanostats)
 	print(nanostats_cmd)
-	nanostats_job=Slurm("nanostat", {"account": account, "ntasks": "4","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	nanostats_job=Slurm("nanostat", {"account": account, "ntasks": "8","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	nanostats_job_id=nanostats_job.run(nanostats_cmd)
 
 	fastqc_qc_cmd=fastqc_qc(sample,fastqc)
