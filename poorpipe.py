@@ -74,9 +74,62 @@ def cnvpytor_call(bam,sample,ref,pytor):
 {pytor} -root {sample}/{sample}.pytor -gc {ref}
 {pytor} -root {sample}/{sample}.pytor -his 2000 200000
 {pytor} -root {sample}/{sample}.pytor -partition 2000 200000
-{pytor} -root {sample}/{sample}.pytor -call 2000 > {sample}/{sample}.pytor.out"""
+{pytor} -root {sample}/{sample}.pytor -call 2000 > {sample}/{sample}.pytor.out
+
+{pytor} -root {sample}/{sample}.pytor -view 2000 <<ENDL
+set print_filename {sample}/{sample}.pytor.vcf
+print calls
+ENDL
+
+"""
 
 	return(cmd)
+
+def cnvpytor_baf(bam,sample,ref,pytor):
+
+
+	manhattan=f"""
+{pytor} -root {sample}/{sample}.pytor -view 200000 <<ENDL
+set style bmh
+set rd_use_mask
+set file_titles {sample}
+manhattan
+save {sample}/pytor/{sample}.manhattan.png
+ENDL
+"""
+
+	chr_plots=[]
+	chromosomes=list(range(1,23))+["X","Y"]
+
+	for chr in chromosomes:
+		chr_plots.append(f"""
+{pytor} -root {sample}/{sample}.pytor -view 200000 <<ENDL
+set style classic
+set rd_use_mask
+set file_titles {sample}
+set panels rd likelihood snp
+set markersize 0.2
+{chr}
+
+save {sample}/pytor/{sample}.{chr}.png
+ENDL
+""")
+	chr_plots="\n".join(chr_plots)
+
+
+	cmd=f"""
+{pytor} -root {sample}/{sample}.pytor -snp {sample}/{sample}.pytor.vcf.gz
+{pytor} -root {sample}/{sample}.pytor -view 200000 <<ENDL
+{pytor} -root file.pytor -mask_snps
+{pytor} -root file.pytor -baf 200000
+
+{chr_plots}
+
+{manhattan}
+
+	"""
+	return(cmd)
+
 
 def deepvariant_call_chr(bam,sample,ref,deepvariant,chromosome):
 	cmd=f"""
@@ -89,6 +142,9 @@ def bcftools_concat(sample,bcftools):
 	bcftools_cmd=f"""
 {bcftools} concat {sample}/{sample}/dv.*vcf | grep -v RefCall | {bcftools} sort -O z - --temp-dir {sample}/tmp/ > {sample}/{sample}.vcf.gz
 {bcftools} index {sample}/{sample}.vcf.gz
+{bcftools} view  {sample}/{sample}.vcf.gz -i "QUAL>20 & FORMAT/DP > 20 & FORMAT/GQ > 10" > {sample}/{sample}.pytor.vcf.gz
+
+{bcftools} view {sample}/{sample}.vcf.gz > {sample}/{sample}.pythor_snp.vcf.gz
 {bcftools} stats {sample}/{sample}.vcf.gz > {sample}/{sample}.txt
 	
 """
@@ -144,6 +200,7 @@ def main():
 		os.system(f"mkdir {sample}/scripts")
 		os.system(f"mkdir {sample}/fastq")
 		os.system(f"mkdir {sample}/tmp")
+		os.system(f"mkdir {sample}/pytor")
 
 	except:
 		pass
@@ -198,6 +255,10 @@ def main():
 	bcftools_concat_job=Slurm("concat", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{dv_jobs}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	bcftools_concat_job_id=bcftools_concat_job.run(bcftools_cmd)
 
+	pytor_baf_cmd=cnvpytor_baf(bam,sample,ref,pytor)
+	pytor_baf_job=Slurm("cnvpytor_baf", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{bcftools_concat_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	pytor_baf_job_id=pytor_baf_job.run(pytor_baf_cmd)
+
 	whatshap_phase_cmd=whatshap_phase(bam,sample,ref,bcftools,whatshap)
 	print(whatshap_phase_cmd)
 	whatshap_phase_job=Slurm("whatshap_phase", {"account": account, "ntasks": "4","time":"1-00:00:00","dependency":f"afterok:{bcftools_concat_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
@@ -226,6 +287,5 @@ def main():
 	print(multiqc_cmd)
 	multiqc_job=Slurm("multiqc", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{fastqc_qc_job_id}:{whatshap_phase_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	multiqc_job_id=multiqc_job.run(multiqc_cmd)
-
 
 main()
