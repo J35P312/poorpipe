@@ -14,6 +14,7 @@ nanostats="singularity exec --bind /home/proj/ singularity/nanostat_1.6.0--pyhdf
 fastqc="singularity exec --bind /home/proj/ singularity/fastqc_0.12.1--hdfd78af_0.sif fastqc"
 multiqc="singularity exec --bind /home/proj/ singularity/multiqc_1.18--pyhdfd78af_0.sif multiqc"
 whatshap="singularity exec --bind /home/proj/ singularity/whatshap_2.1--py39h1f90b4d_0.sif whatshap"
+bgzip="singularity exec --bind /home/proj/ singularity/bcftools_1.19--h8b25389_0.sif bgzip"
 
 trgt="singularity exec --bind /home/proj/ singularity/trgt_0.4.0.sif trgt"
 trgt_repeats="reeats_hg19.bed"
@@ -40,9 +41,9 @@ def align(input_folder,sample,ref,samtools):
 
 	cmd=f"""
 
-parallel -j 20 < {prefix}/parallel_fastq.txt
+parallel --tmpdir {sample}/tmp -j 20 < {prefix}/parallel_fastq.txt
 cat {sample}/fastq/* > {prefix}/{prefix}.fastq.gz
-minimap2 -R "@RG\\tID:{prefix}\\tSM:{prefix}" -a -t 16 --MD -x map-ont {ref} {prefix}/{prefix}.fastq.gz | {samtools} sort -m 5G -@8 - > {prefix}/{prefix}.bam
+minimap2 -R "@RG\\tID:{prefix}\\tSM:{prefix}" -a -t 16 --MD -x map-ont {ref} {prefix}/{prefix}.fastq.gz | {samtools} sort -T {sample}/tmp/{sample}.samtools -m 5G -@8 - > {prefix}/{prefix}.bam
 {samtools} index -@16  {prefix}/{prefix}.bam
 {samtools} stats {prefix}/{prefix}.bam > {prefix}/{prefix}.bam.stats.txt
 """
@@ -58,6 +59,14 @@ def target_type(bam,sample,ref,trgt_repeats,trgt):
 
 def picard_qc(bam,sample,ref,picard):
 	cmd=f"{picard}  -Xmx20G CollectWgsMetrics --INPUT {bam} --OUTPUT {sample}/{sample}.wgsmetrics.txt --REFERENCE_SEQUENCE {ref} --COUNT_UNPAIRED true --MINIMUM_BASE_QUALITY 1 --VALIDATION_STRINGENCY SILENT"
+	return(cmd)
+
+def picard_gc(bam,sample,ref,picard,samtools):
+	cmd=f"""
+{samtools} view -bh -F 256 {bam} > {sample}/{sample}.filt.bam
+{samtools} index {sample}/{sample}.filt.bam
+{picard} -Xmx20G CollectGcBiasMetrics --CHART {sample}/{sample}.gc.pdf --INPUT {sample}/{sample}.filt.bam --SUMMARY_OUTPUT {sample}/{sample}.gc_summary.txt --OUTPUT {sample}/{sample}.gc.txt --REFERENCE_SEQUENCE {ref} --VALIDATION_STRINGENCY SILENT
+"""
 	return(cmd)
 
 def cnvpytor_call(bam,sample,ref,pytor):
@@ -109,13 +118,15 @@ def fastqc_qc(sample,fastqc):
 	return(cmd)
 
 def multiqc_collect(sample,multiqc):
-	cmd=f"{multiqc} {sample} --outdir {sample}"
+	cmd=f"{multiqc} {sample} --cl-config \"log_filesize_limit: 2000000000\" --outdir {sample}"
 	return(cmd)
 
-def vep_annotation(sample,in_vcf,out_vcf,vep,vep_options,bcftools):
+def vep_annotation(sample,in_vcf,out_vcf,vep,vep_options,bcftools,bgzip):
 	cmd=f"""
-{vep} --offline --cache -i {in_vcf} -o {out_vcf} --stats_file {sample}/{sample}.variant_effect_output.txt_summary.html --force_overwrite --fork 16 --vcf {vep_options}
-{bcftools} index {out_vcf}
+{vep} --offline --cache -i {in_vcf} -o {out_vcf} --force_overwrite --fork 16 --vcf {vep_options}
+{bgzip} -f {out_vcf}
+{bcftools} index {out_vcf}.gz
+
 """
 	return(cmd)
 
@@ -158,6 +169,10 @@ def main():
 	picard_job=Slurm("picard", {"account": account, "ntasks": "8","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	picard_job_id=picard_job.run(picard_cmd)
 
+	picard_gc_cmd=picard_gc(bam,sample,ref,picard,samtools)
+	picard_gc_job=Slurm("picard_gc", {"account": account, "ntasks": "8","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	picard_gc_job_id=picard_gc_job.run(picard_gc_cmd)
+
 	pytor_cmd=cnvpytor_call(bam,sample,ref,pytor)
 	print(pytor_cmd)
 	pytor_job=Slurm("cnvpytor", {"account": account, "ntasks": "4","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
@@ -193,7 +208,7 @@ def main():
 	whatshap_haplotag_job=Slurm("whatshap_haplotag", {"account": account, "ntasks": "4","time":"1-00:00:00","dependency":f"afterok:{whatshap_phase_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	whatshap_haplotag_job_id=whatshap_haplotag_job.run(whatshap_haplotag_cmd)
 
-	vep_cmd=vep_annotation(sample,f"{sample}/{sample}.whatshap.vcf.gz",f"{sample}/{sample}.vcf.gz",vep,vep_options,bcftools)
+	vep_cmd=vep_annotation(sample,f"{sample}/{sample}.whatshap.vcf.gz",f"{sample}/{sample}.vcf",vep,vep_options,bcftools,bgzip)
 	vep_job=Slurm("vep_annotation", {"account": account, "ntasks": "16","time":"1-00:00:00","dependency":f"afterok:{whatshap_phase_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	vep_job_id=vep_job.run(vep_cmd)
 
