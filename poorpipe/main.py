@@ -2,33 +2,42 @@ from slurmpy import Slurm
 import sys
 import os
 import glob
+import json
 
-account="development"
-samtools="singularity exec --bind /home/proj/ singularity/samtools_1.19--h50ea8bc_0.sif samtools"
-sniffles="singularity exec --bind /home/proj/ singularity/sniffles_2.2--pyhdfd78af_0.sif sniffles"
-picard="singularity exec --bind /home/proj/ singularity/picard_3.1.1--hdfd78af_0.sif picard"
-pytor="singularity exec --bind /home/proj singularity/cnvpytor_1.3.1--pyhdfd78af_1.sif cnvpytor"
-deepvariant="singularity exec --bind /home/proj/ singularity/deepvariant_latest.sif"
-bcftools="singularity exec --bind /home/proj/ singularity/bcftools_1.19--h8b25389_0.sif bcftools"
-nanostats="singularity exec --bind /home/proj/ singularity/nanostat_1.6.0--pyhdfd78af_0.sif NanoStat"
-fastqc="singularity exec --bind /home/proj/ singularity/fastqc_0.12.1--hdfd78af_0.sif fastqc"
-multiqc="singularity exec --bind /home/proj/ singularity/multiqc_1.18--pyhdfd78af_0.sif multiqc"
-whatshap="singularity exec --bind /home/proj/ singularity/whatshap_2.1--py39h1f90b4d_0.sif whatshap"
-bgzip="singularity exec --bind /home/proj/ singularity/bcftools_1.19--h8b25389_0.sif bgzip"
-svdb="singularity exec --bind /home/proj/ singularity/svdb_2.8.2--py38h24c8ff8_1.sif svdb"
-tiddit="singularity exec --bind /home/proj/ singularity/tiddit_3.6.1--py38h24c8ff8_0.sif tiddit"
+with open(sys.argv[3]) as config_file:
+	config = json.load(config_file)
 
-trgt="singularity exec --bind /home/proj/ singularity/trgt_0.4.0.sif trgt"
-trgt_repeats="grch37_expansionhunter_variant_catalog_-5.0.0-.bed"
 
-vep="singularity exec --bind /home/proj/ singularity/ensembl-vep_107.0--pl5321h4a94de4_0.sif vep"
-vep_options="--af_gnomadg --af_1kg --assembly GRCh37 --dir_cache /home/proj/production/rare-disease/references/references_11.0/ensembl-tools-release-107/cache/ --sift b --symbol --hgvs --clin_sig_allele 1 --polyphen b --merged --offline --plugin SpliceAI,snv=/home/proj/production/rare-disease/references/references_12.0/grch37_spliceai_scores_raw_snv_-v1.3-.vcf.gz,indel=/home/proj/production/rare-disease/references/references_12.0/grch37_spliceai_scores_raw_indel_-v1.3-.vcf.gz --plugin CADD,databases/whole_genome_SNVs.tsv.gz,databases/InDels.tsv.gz --plugin dbNSFP,/home/proj/production/rare-disease/references/references_12.0/grch37_dbnsfp_-v3.5a-.txt.gz,ALL --mirna --regulatory --gene_phenotype"
-vep_sv_options="--assembly GRCh37 --dir_cache /home/proj/production/rare-disease/references/references_11.0/ensembl-tools-release-107/cache/ --symbol --hgvs --merged --offline --max_sv_size 300000000 --per_gene --mirna --regulatory --gene_phenotype"
+#extract slurm config
+account=config["slurm"]["account"]
 
-ref="/home/proj/production/rare-disease/references/references_12.0/grch37_homo_sapiens_-d5-.fasta"
+#setup tools
+singularity_options=config["singularity"]["options"]
+singularity_cmd=f"singularity exec {singularity_options}" 
 
-#{samtools} merge -f {prefix}/{prefix}.bam {input_folder}/*bam
-#{samtools} fastq -T MM,ML {prefix}/{prefix}.bam | gzip -c > {prefix}/{prefix}.fastq.gz
+samtools=f"{singularity_cmd} singularity/samtools_1.19--h50ea8bc_0.sif samtools"
+sniffles=f"{singularity_cmd} singularity/sniffles_2.2--pyhdfd78af_0.sif sniffles"
+picard=f"{singularity_cmd} singularity/picard_3.1.1--hdfd78af_0.sif picard"
+pytor=f"{singularity_cmd} singularity/cnvpytor_1.3.1--pyhdfd78af_1.sif cnvpytor"
+deepvariant=f"{singularity_cmd} singularity/deepvariant_latest.sif"
+bcftools=f"{singularity_cmd} singularity/bcftools_1.19--h8b25389_0.sif bcftools"
+nanostats=f"{singularity_cmd} singularity/nanostat_1.6.0--pyhdfd78af_0.sif NanoStat"
+fastqc=f"{singularity_cmd} singularity/fastqc_0.12.1--hdfd78af_0.sif fastqc"
+multiqc=f"{singularity_cmd} singularity/multiqc_1.18--pyhdfd78af_0.sif multiqc"
+whatshap=f"{singularity_cmd} singularity/whatshap_2.1--py39h1f90b4d_0.sif whatshap"
+bgzip=f"{singularity_cmd} singularity/bcftools_1.19--h8b25389_0.sif bgzip"
+svdb=f"{singularity_cmd} singularity/svdb_2.8.2--py38h24c8ff8_1.sif svdb"
+tiddit=f"{singularity_cmd} singularity/tiddit_3.6.1--py38h24c8ff8_0.sif tiddit"
+
+trgt="{} {} trgt".format(singularity_cmd,config["tools"]["trgt"]["singularity"] )
+trgt_repeats=config["tools"]["trgt"]["repeat_catalog"]
+
+vep="{} {} vep".format( singularity_cmd,config["tools"]["vep"]["singularity"] )
+vep_options=config["tools"]["vep"]["vep_snv"]
+vep_sv_options=config["tools"]["vep"]["vep_sv"]
+
+ref=config["reference"]
+
 def align(input_folder,sample,ref,samtools):
 	prefix=sample
 	bam2fastq=[]
