@@ -5,7 +5,7 @@ import glob
 
 account="development"
 samtools="singularity exec --bind /home/proj/ singularity/samtools_1.19--h50ea8bc_0.sif samtools"
-sniffles="singularity exec --bind /home/proj/ singularity/sniffles_1.0.12--h8b12597_1.sif sniffles"
+sniffles="singularity exec --bind /home/proj/ singularity/sniffles_2.2--pyhdfd78af_0.sif sniffles"
 picard="singularity exec --bind /home/proj/ singularity/picard_3.1.1--hdfd78af_0.sif picard"
 pytor="singularity exec --bind /home/proj singularity/cnvpytor_1.3.1--pyhdfd78af_1.sif cnvpytor"
 deepvariant="singularity exec --bind /home/proj/ singularity/deepvariant_latest.sif"
@@ -15,12 +15,15 @@ fastqc="singularity exec --bind /home/proj/ singularity/fastqc_0.12.1--hdfd78af_
 multiqc="singularity exec --bind /home/proj/ singularity/multiqc_1.18--pyhdfd78af_0.sif multiqc"
 whatshap="singularity exec --bind /home/proj/ singularity/whatshap_2.1--py39h1f90b4d_0.sif whatshap"
 bgzip="singularity exec --bind /home/proj/ singularity/bcftools_1.19--h8b25389_0.sif bgzip"
+svdb="singularity exec --bind /home/proj/ singularity/svdb_2.8.2--py38h24c8ff8_1.sif svdb"
+tiddit="singularity exec --bind /home/proj/ singularity/tiddit_3.6.1--py38h24c8ff8_0.sif tiddit"
 
 trgt="singularity exec --bind /home/proj/ singularity/trgt_0.4.0.sif trgt"
-trgt_repeats="reeats_hg19.bed"
+trgt_repeats="grch37_expansionhunter_variant_catalog_-5.0.0-.bed"
 
 vep="singularity exec --bind /home/proj/ singularity/ensembl-vep_107.0--pl5321h4a94de4_0.sif vep"
-vep_options="--af_gnomadg --af_1kg --assembly GRCh37 --dir_cache /home/proj/production/rare-disease/references/references_11.0/ensembl-tools-release-107/cache/ --sift b --symbol --hgvs --clin_sig_allele 1 --polyphen b --merged --offline --plugin SpliceAI,snv=/home/proj/production/rare-disease/references/references_12.0/grch37_spliceai_scores_raw_snv_-v1.3-.vcf.gz,indel=/home/proj/production/rare-disease/references/references_12.0/grch37_spliceai_scores_raw_indel_-v1.3-.vcf.gz --plugin CADD,databases/whole_genome_SNVs.tsv.gz,databases/InDels.tsv.gz --plugin dbNSFP,/home/proj/production/rare-disease/references/references_12.0/grch37_dbnsfp_-v3.5a-.txt.gz,ALL"
+vep_options="--af_gnomadg --af_1kg --assembly GRCh37 --dir_cache /home/proj/production/rare-disease/references/references_11.0/ensembl-tools-release-107/cache/ --sift b --symbol --hgvs --clin_sig_allele 1 --polyphen b --merged --offline --plugin SpliceAI,snv=/home/proj/production/rare-disease/references/references_12.0/grch37_spliceai_scores_raw_snv_-v1.3-.vcf.gz,indel=/home/proj/production/rare-disease/references/references_12.0/grch37_spliceai_scores_raw_indel_-v1.3-.vcf.gz --plugin CADD,databases/whole_genome_SNVs.tsv.gz,databases/InDels.tsv.gz --plugin dbNSFP,/home/proj/production/rare-disease/references/references_12.0/grch37_dbnsfp_-v3.5a-.txt.gz,ALL --mirna --regulatory --gene_phenotype"
+vep_sv_options="--assembly GRCh37 --dir_cache /home/proj/production/rare-disease/references/references_11.0/ensembl-tools-release-107/cache/ --symbol --hgvs --merged --offline --max_sv_size 300000000 --per_gene --mirna --regulatory --gene_phenotype"
 
 ref="/home/proj/production/rare-disease/references/references_12.0/grch37_homo_sapiens_-d5-.fasta"
 
@@ -50,7 +53,12 @@ minimap2 -R "@RG\\tID:{prefix}\\tSM:{prefix}" -a -t 16 --MD -x map-ont {ref} {pr
 	return(cmd)
 
 def sniffles_sv(bam,sample,sniffles):
-	cmd=f"""{sniffles} -m {bam} -v {sample}/{sample}.sniffles.vcf -l 100 -t 16 -s 3 --genotype --cluster"""
+	cmd=f"""{sniffles} -i {bam} --snf {sample}/{sample}.snf --vcf {sample}/{sample}.snf.vcf --minsupport 3 --max-del-seq-len 100 --allow-overwrite  --qc-stdev False --long-ins-length 50000 --long-del-length 999999999 --long-dup-length 999999999 --bnd-min-split-length 500 --min-alignment-length 500  --sample-id {sample}"""
+
+	return(cmd)
+
+def tiddit_coverage(bam,tiddit):
+	cmd=f"{tiddit} --cov --bam {bam} -o {bam}"
 	return(cmd)
 
 def target_type(bam,sample,ref,trgt_repeats,trgt):
@@ -59,6 +67,10 @@ def target_type(bam,sample,ref,trgt_repeats,trgt):
 
 def picard_qc(bam,sample,ref,picard):
 	cmd=f"{picard}  -Xmx20G CollectWgsMetrics --INPUT {bam} --OUTPUT {sample}/{sample}.wgsmetrics.txt --REFERENCE_SEQUENCE {ref} --COUNT_UNPAIRED true --MINIMUM_BASE_QUALITY 1 --VALIDATION_STRINGENCY SILENT"
+	return(cmd)
+
+def svdb_merge(pytor,sniffles,svdb,sample):
+	cmd=f"{svdb} --merge --vcf {pytor} {sniffles} --no_var --no_intra --bnd_distance 5000 --overlap 0.5 > {sample}/{sample}.sv.vcf"
 	return(cmd)
 
 def picard_gc(bam,sample,ref,picard,samtools):
@@ -75,6 +87,7 @@ def cnvpytor_call(bam,sample,ref,pytor):
 {pytor} -root {sample}/{sample}.pytor -his 2000 200000
 {pytor} -root {sample}/{sample}.pytor -partition 2000 200000
 {pytor} -root {sample}/{sample}.pytor -call 2000 > {sample}/{sample}.pytor.out
+{pytor} -root {sample}/{sample}.pytor -call 200000 > {sample}/{sample}.pytor.200k.out
 
 {pytor} -root {sample}/{sample}.pytor -view 2000 <<ENDL
 set print_filename {sample}/{sample}.pytor.vcf
@@ -216,6 +229,10 @@ def main():
 	align_job_id=align_job.run(align_cmd)
 	print(align_job_id)
 
+	tiddit_cov_cmd=tiddit_coverage(bam,tiddit)
+	tiddit_cov_job=Slurm("tiddit", {"account": account, "ntasks": "2","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	tiddit_cov_job_id=tiddit_cov_job.run(tiddit_cov_cmd)
+
 	sniffles_cmd=sniffles_sv(bam,sample,sniffles)
 	print(sniffles_cmd)
 	sniffles_job=Slurm("sniffles", {"account": account, "ntasks": "16","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
@@ -258,6 +275,14 @@ def main():
 	pytor_baf_cmd=cnvpytor_baf(bam,sample,ref,pytor)
 	pytor_baf_job=Slurm("cnvpytor_baf", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{bcftools_concat_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	pytor_baf_job_id=pytor_baf_job.run(pytor_baf_cmd)
+
+	svdb_merge_cmd=svdb_merge(f"{sample}/{sample}.pytor.vcf",f"{sample}/{sample}.snf.vcf",svdb,sample)
+	svdb_merge_job=Slurm("svdb_merge", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{pytor_job_id}:{sniffles_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	svdb_merge_job_id=svdb_merge_job.run(svdb_merge_cmd)
+
+	vep_sv_cmd=vep_annotation(sample,f"{sample}/{sample}.sv.vcf",f"{sample}/{sample}.sv.vep.vcf",vep,vep_sv_options,bcftools,bgzip)
+	vep_sv_job=Slurm("vep_sv_annotation", {"account": account, "ntasks": "16","time":"1-00:00:00","dependency":f"afterok:{svdb_merge_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	vep_sv_job_id=vep_sv_job.run(vep_sv_cmd)
 
 	whatshap_phase_cmd=whatshap_phase(bam,sample,ref,bcftools,whatshap)
 	print(whatshap_phase_cmd)
