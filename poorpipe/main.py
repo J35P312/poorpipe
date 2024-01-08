@@ -4,6 +4,11 @@ import os
 import glob
 import json
 
+from tools.align import align
+from tools.cnvpytor import cnvpytor_call
+from tools.cnvpytor import cnvpytor_baf
+from tools.sniffles import sniffles_sv
+
 with open(sys.argv[3]) as config_file:
 	config = json.load(config_file)
 
@@ -15,21 +20,22 @@ account=config["slurm"]["account"]
 singularity_options=config["singularity"]["options"]
 singularity_cmd=f"singularity exec {singularity_options}" 
 
-samtools=f"{singularity_cmd} singularity/samtools_1.19--h50ea8bc_0.sif samtools"
-sniffles=f"{singularity_cmd} singularity/sniffles_2.2--pyhdfd78af_0.sif sniffles"
-picard=f"{singularity_cmd} singularity/picard_3.1.1--hdfd78af_0.sif picard"
-pytor=f"{singularity_cmd} singularity/cnvpytor_1.3.1--pyhdfd78af_1.sif cnvpytor"
-deepvariant=f"{singularity_cmd} singularity/deepvariant_latest.sif"
-bcftools=f"{singularity_cmd} singularity/bcftools_1.19--h8b25389_0.sif bcftools"
-nanostats=f"{singularity_cmd} singularity/nanostat_1.6.0--pyhdfd78af_0.sif NanoStat"
-fastqc=f"{singularity_cmd} singularity/fastqc_0.12.1--hdfd78af_0.sif fastqc"
-multiqc=f"{singularity_cmd} singularity/multiqc_1.18--pyhdfd78af_0.sif multiqc"
-whatshap=f"{singularity_cmd} singularity/whatshap_2.1--py39h1f90b4d_0.sif whatshap"
-bgzip=f"{singularity_cmd} singularity/bcftools_1.19--h8b25389_0.sif bgzip"
-svdb=f"{singularity_cmd} singularity/svdb_2.8.2--py38h24c8ff8_1.sif svdb"
-tiddit=f"{singularity_cmd} singularity/tiddit_3.6.1--py38h24c8ff8_0.sif tiddit"
+samtools    =f"{singularity_cmd} { config['tools']['samtools']['singularity'] } samtools"
+sniffles    =f"{singularity_cmd} { config['tools']['sniffles']['singularity'] } sniffles"
+picard      =f"{singularity_cmd} { config['tools']['sniffles']['singularity'] } picard"
+pytor       =f"{singularity_cmd} { config['tools']['cnvpytor']['singularity'] } cnvpytor"
+deepvariant =f"{singularity_cmd} { config['tools']['deepvariant']['singularity'] }"
+bcftools    =f"{singularity_cmd} { config['tools']['bcftools']['singularity'] } bcftools"
+nanostats   =f"{singularity_cmd} { config['tools']['nanostats']['singularity'] } NanoStat"
+fastqc      =f"{singularity_cmd} { config['tools']['fastqc']['singularity'] } fastqc"
+multiqc     =f"{singularity_cmd} { config['tools']['multiqc']['singularity'] } multiqc"
+whatshap    =f"{singularity_cmd} { config['tools']['whatshap']['singularity'] } whatshap"
+bgzip       =f"{singularity_cmd} { config['tools']['bcftools']['singularity'] } bgzip"
+svdb        =f"{singularity_cmd} { config['tools']['svdb']['singularity'] } svdb"
+tiddit      =f"{singularity_cmd} { config['tools']['tiddit']['singularity'] } tiddit"
+methylartist=f"{singularity_cmd} { config['tools']['methylartist']['singularity']} methylartist"
 
-trgt="{} {} trgt".format(singularity_cmd,config["tools"]["trgt"]["singularity"] )
+trgt=config["tools"]["trgt"]["binary"]
 trgt_repeats=config["tools"]["trgt"]["repeat_catalog"]
 
 vep="{} {} vep".format( singularity_cmd,config["tools"]["vep"]["singularity"] )
@@ -38,40 +44,19 @@ vep_sv_options=config["tools"]["vep"]["vep_sv"]
 
 ref=config["reference"]
 
-def align(input_folder,sample,ref,samtools):
-	prefix=sample
-	bam2fastq=[]
-
-	fastq_list=open(f"{prefix}/parallel_fastq.txt","w")
-	for line in open(f"{sample}/bam_input.txt"):
-		b=line.split("/")[-1].split(".")[0]
-		f=line.strip()
-		bam2fastq.append(f"{samtools} fastq -T MM,ML {f} | gzip -c > {prefix}/fastq/{b}.fastq.gz" )
-
-	bam2fastq="\n".join(bam2fastq)
-	fastq_list.write(bam2fastq)
-
-	cmd=f"""
-
-parallel --tmpdir {sample}/tmp -j 20 < {prefix}/parallel_fastq.txt
-cat {sample}/fastq/* > {prefix}/{prefix}.fastq.gz
-minimap2 -R "@RG\\tID:{prefix}\\tSM:{prefix}" -a -t 16 --MD -x map-ont {ref} {prefix}/{prefix}.fastq.gz | {samtools} sort -T {sample}/tmp/{sample}.samtools -m 5G -@8 - > {prefix}/{prefix}.bam
-{samtools} index -@16  {prefix}/{prefix}.bam
-{samtools} stats {prefix}/{prefix}.bam > {prefix}/{prefix}.bam.stats.txt
-"""
-	return(cmd)
-
-def sniffles_sv(bam,sample,sniffles):
-	cmd=f"""{sniffles} -i {bam} --snf {sample}/{sample}.snf --vcf {sample}/{sample}.snf.vcf --minsupport 3 --max-del-seq-len 100 --allow-overwrite  --qc-stdev False --long-ins-length 50000 --long-del-length 999999999 --long-dup-length 999999999 --bnd-min-split-length 500 --min-alignment-length 500  --sample-id {sample}"""
-
-	return(cmd)
-
 def tiddit_coverage(bam,tiddit):
 	cmd=f"{tiddit} --cov --bam {bam} -o {bam}"
 	return(cmd)
 
-def target_type(bam,sample,ref,trgt_repeats,trgt):
-	cmd=f"{trgt} --genome {ref} --repeats {trgt_repeats} --reads {bam} --output-prefix {sample}/{sample}.trgt"
+def methylartist_wgmeth(bam,ref,methylartist,cores):
+	cmd=f"{methylartist} wgmeth -b {bam} -r {ref} -f {ref}.fai  --motif CG --mod m --primary_only -p {cores}"
+	return(cmd)
+
+def target_type(bam,sample,ref,trgt_repeats,trgt,samtools):
+	cmd=f"""
+{samtools} view {bam} -bh -x MM -x ML >  {bam}.nometh.bam
+{samtools} index {bam}.nometh.bam
+{trgt} --genome {ref} --repeats {trgt_repeats} --reads {bam}.nometh.bam --output-prefix {sample}/{sample}.trgt"""
 	return(cmd)
 
 def picard_qc(bam,sample,ref,picard):
@@ -89,69 +74,6 @@ def picard_gc(bam,sample,ref,picard,samtools):
 {picard} -Xmx20G CollectGcBiasMetrics --CHART {sample}/{sample}.gc.pdf --INPUT {sample}/{sample}.filt.bam --SUMMARY_OUTPUT {sample}/{sample}.gc_summary.txt --OUTPUT {sample}/{sample}.gc.txt --REFERENCE_SEQUENCE {ref} --VALIDATION_STRINGENCY SILENT
 """
 	return(cmd)
-
-def cnvpytor_call(bam,sample,ref,pytor):
-	cmd=f"""{pytor} -root {sample}/{sample}.pytor -rd {bam}
-{pytor} -root {sample}/{sample}.pytor -gc {ref}
-{pytor} -root {sample}/{sample}.pytor -his 2000 200000
-{pytor} -root {sample}/{sample}.pytor -partition 2000 200000
-{pytor} -root {sample}/{sample}.pytor -call 2000 > {sample}/{sample}.pytor.out
-{pytor} -root {sample}/{sample}.pytor -call 200000 > {sample}/{sample}.pytor.200k.out
-
-{pytor} -root {sample}/{sample}.pytor -view 2000 <<ENDL
-set print_filename {sample}/{sample}.pytor.vcf
-print calls
-ENDL
-
-"""
-
-	return(cmd)
-
-def cnvpytor_baf(bam,sample,ref,pytor):
-
-
-	manhattan=f"""
-{pytor} -root {sample}/{sample}.pytor -view 200000 <<ENDL
-set style bmh
-set rd_use_mask
-set file_titles {sample}
-manhattan
-save {sample}/pytor/{sample}.manhattan.png
-ENDL
-"""
-
-	chr_plots=[]
-	chromosomes=list(range(1,23))+["X","Y"]
-
-	for chr in chromosomes:
-		chr_plots.append(f"""
-{pytor} -root {sample}/{sample}.pytor -view 200000 <<ENDL
-set style classic
-set rd_use_mask
-set file_titles {sample}
-set panels rd likelihood snp
-set markersize 0.2
-{chr}
-
-save {sample}/pytor/{sample}.{chr}.png
-ENDL
-""")
-	chr_plots="\n".join(chr_plots)
-
-
-	cmd=f"""
-{pytor} -root {sample}/{sample}.pytor -snp {sample}/{sample}.pytor.vcf.gz
-{pytor} -root {sample}/{sample}.pytor -view 200000 <<ENDL
-{pytor} -root file.pytor -mask_snps
-{pytor} -root file.pytor -baf 200000
-
-{chr_plots}
-
-{manhattan}
-
-	"""
-	return(cmd)
-
 
 def deepvariant_call_chr(bam,sample,ref,deepvariant,chromosome):
 	cmd=f"""
@@ -208,6 +130,15 @@ def vep_annotation(sample,in_vcf,out_vcf,vep,vep_options,bcftools,bgzip):
 """
 	return(cmd)
 
+def svdb_query(in_vcf,out_vcf,db,svdb):
+	cmd=f"{svdb} --query --query_vcf {in_vcf} --overlap 0.5 --bnd_distance 10000 --db {db} > {out_vcf}"
+	return(cmd)
+
+def submit_job(cmd,job_name,slurm_settings,sample):
+	job=Slurm(job_name,slurm_settings,log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	job_id=job.run(cmd)
+	return(job_id)
+
 def main():
 
 	input_folder=sys.argv[1]
@@ -232,11 +163,12 @@ def main():
 	ubam_path.close()
 
 	align_cmd=align(input_folder,sample,ref,samtools)
+	align_slurm_settings={"account": account, "ntasks": "20","time":"3-00:00:00" }
+	align_job_id=submit_job(align_cmd,"align",align_slurm_settings,sample)
 
-	print(align_cmd)
-	align_job=Slurm("align", {"account": account, "ntasks": "20","time":"3-00:00:00" },log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
-	align_job_id=align_job.run(align_cmd)
-	print(align_job_id)
+	methylartist_wgmeth_cmd=methylartist_wgmeth(bam,ref,methylartist,16)
+	methylartist_wgmeth_slurm_settings={"account": account, "ntasks": "16","time":"3-00:00:00","dependency":f"afterok:{align_job_id}" }
+	methylartist_wgmeth_job_id=submit_job(methylartist_wgmeth_cmd,"methylartist_wgmeth",methylartist_wgmeth_slurm_settings,sample)
 
 	tiddit_cov_cmd=tiddit_coverage(bam,tiddit)
 	tiddit_cov_job=Slurm("tiddit", {"account": account, "ntasks": "2","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
@@ -261,7 +193,7 @@ def main():
 	pytor_job=Slurm("cnvpytor", {"account": account, "ntasks": "4","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	pytor_job_id=pytor_job.run(pytor_cmd)
 
-	trgt_cmd=target_type(bam,sample,ref,trgt_repeats,trgt)
+	trgt_cmd=target_type(bam,sample,ref,trgt_repeats,trgt,samtools)
 	print(trgt_cmd)
 	trgt_job=Slurm("trgt", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	trgt_job_id=trgt_job.run(trgt_cmd)
@@ -292,6 +224,12 @@ def main():
 	vep_sv_cmd=vep_annotation(sample,f"{sample}/{sample}.sv.vcf",f"{sample}/{sample}.sv.vep.vcf",vep,vep_sv_options,bcftools,bgzip)
 	vep_sv_job=Slurm("vep_sv_annotation", {"account": account, "ntasks": "16","time":"1-00:00:00","dependency":f"afterok:{svdb_merge_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	vep_sv_job_id=vep_sv_job.run(vep_sv_cmd)
+
+
+	if not "" == config['tools']['svdb']['database']:
+		svdb_query_cmd=svdb_query(f"{sample}/{sample}.sv.vep.vcf",f"{sample}/{sample}.sv.vep.svdb.vcf",config['tools']['svdb']['database'],svdb)
+		svdb_query_job=Slurm("svdb_query", {"account": account, "ntasks": "2","time":"1-00:00:00","dependency":f"afterok:{vep_sv_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+		svdb_query_job_id=svdb_query_job.run(svdb_query_cmd)
 
 	whatshap_phase_cmd=whatshap_phase(bam,sample,ref,bcftools,whatshap)
 	print(whatshap_phase_cmd)

@@ -11,6 +11,11 @@ ubam_folder is a folder containing bam files. The config is a json file, the fil
 # Dependencies
 The pipeline itself requires python 3 and slurmpy. 
 
+# Download
+TRGT file
+
+https://harrietdashnow.com/STRchive/data/hg19.STRchive-disease-loci.TRGT.bed
+
 # Todo
 
 
