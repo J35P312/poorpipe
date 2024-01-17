@@ -15,6 +15,7 @@ with open(sys.argv[3]) as config_file:
 
 #extract slurm config
 account=config["slurm"]["account"]
+processes=config["processes"]
 
 #setup tools
 singularity_options=config["singularity"]["options"]
@@ -22,7 +23,7 @@ singularity_cmd=f"singularity exec {singularity_options}"
 
 samtools    =f"{singularity_cmd} { config['tools']['samtools']['singularity'] } samtools"
 sniffles    =f"{singularity_cmd} { config['tools']['sniffles']['singularity'] } sniffles"
-picard      =f"{singularity_cmd} { config['tools']['sniffles']['singularity'] } picard"
+picard      =f"{singularity_cmd} { config['tools']['picard']['singularity'] } picard"
 pytor       =f"{singularity_cmd} { config['tools']['cnvpytor']['singularity'] } cnvpytor"
 deepvariant =f"{singularity_cmd} { config['tools']['deepvariant']['singularity'] }"
 bcftools    =f"{singularity_cmd} { config['tools']['bcftools']['singularity'] } bcftools"
@@ -49,7 +50,14 @@ def tiddit_coverage(bam,tiddit):
 	return(cmd)
 
 def methylartist_wgmeth(bam,ref,methylartist,cores):
-	cmd=f"{methylartist} wgmeth -b {bam} -r {ref} -f {ref}.fai  --motif CG --mod m --primary_only -p {cores}"
+	cmd=f"""
+{methylartist} wgmeth -b {bam} -r {ref} -f {ref}.fai  --motif CG --mod m --primary_only -p {cores} -q 0 -o {bam}.m.methyl.bed
+{methylartist} wgmeth -b {bam} -r {ref} -f {ref}.fai  --motif CG --mod m --primary_only -p {cores} --dss -q 0 -o {bam}.m.dss.bed
+"""
+	return(cmd)
+
+def methylartist_wgmeth_phased(bam,ref,methylartist,cores):
+	cmd=f"{methylartist} wgmeth -b {bam} -r {ref} -f {ref}.fai  --motif CG --mod m --primary_only -p {cores} -q 0 --phased -o {bam}.happlotagged.m.methyl.bed"
 	return(cmd)
 
 def target_type(bam,sample,ref,trgt_repeats,trgt,samtools):
@@ -81,10 +89,10 @@ TMPDIR={sample}/tmp/
 {deepvariant} run_deepvariant --output_vcf {sample}/{sample}/dv.{chromosome}.vcf --model_type ONT_R104 --num_shards 16 --reads {bam} --ref {ref} --regions {chromosome} --intermediate_results_dir {sample}/tmp/{chromosome}"""
 	return(cmd)
 
-def bcftools_concat(sample,bcftools):
+def bcftools_concat(sample,ref,bcftools):
 
 	bcftools_cmd=f"""
-{bcftools} concat {sample}/{sample}/dv.*vcf | grep -v RefCall | {bcftools} sort -O z - --temp-dir {sample}/tmp/ > {sample}/{sample}.vcf.gz
+{bcftools} concat {sample}/{sample}/dv.*vcf | grep -v RefCall | {bcftools} sort -O z - --temp-dir {sample}/tmp/ | {bcftools} norm -O z -f {ref} -m- - > {sample}/{sample}.vcf.gz
 {bcftools} index {sample}/{sample}.vcf.gz
 {bcftools} view  {sample}/{sample}.vcf.gz -i "QUAL>20 & FORMAT/DP > 20 & FORMAT/GQ > 10" > {sample}/{sample}.pytor.vcf.gz
 
@@ -163,12 +171,11 @@ def main():
 	ubam_path.close()
 
 	align_cmd=align(input_folder,sample,ref,samtools)
-	align_slurm_settings={"account": account, "ntasks": "20","time":"3-00:00:00" }
-	align_job_id=submit_job(align_cmd,"align",align_slurm_settings,sample)
+	align_job_id=submit_job(align_cmd,"align",{"account": account, "ntasks":processes['align']['cores'],"time":processes['align']['time'] },sample)
 
 	methylartist_wgmeth_cmd=methylartist_wgmeth(bam,ref,methylartist,16)
-	methylartist_wgmeth_slurm_settings={"account": account, "ntasks": "16","time":"3-00:00:00","dependency":f"afterok:{align_job_id}" }
-	methylartist_wgmeth_job_id=submit_job(methylartist_wgmeth_cmd,"methylartist_wgmeth",methylartist_wgmeth_slurm_settings,sample)
+	methylartist_wgmeth_job_id=submit_job(methylartist_wgmeth_cmd, "methylartist_wgmeth",
+	{"account": account, "ntasks": processes['methylartist_wgmeth']['cores'],"time":processes['methylartist_wgmeth']['time'],"dependency":f"afterok:{align_job_id}" },sample)
 
 	tiddit_cov_cmd=tiddit_coverage(bam,tiddit)
 	tiddit_cov_job=Slurm("tiddit", {"account": account, "ntasks": "2","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
@@ -206,7 +213,7 @@ def main():
 		dv_job=Slurm(f"deepvariant_{chromosome}", {"account": account, "ntasks": "16","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 		dv_jobs.append(dv_job.run(dv_cmd))
 
-	bcftools_cmd=bcftools_concat(sample,bcftools)
+	bcftools_cmd=bcftools_concat(sample,ref,bcftools)
 	print(bcftools_cmd)
 
 	dv_jobs=":".join(map(str,dv_jobs))
@@ -227,7 +234,7 @@ def main():
 
 
 	if not "" == config['tools']['svdb']['database']:
-		svdb_query_cmd=svdb_query(f"{sample}/{sample}.sv.vep.vcf",f"{sample}/{sample}.sv.vep.svdb.vcf",config['tools']['svdb']['database'],svdb)
+		svdb_query_cmd=svdb_query(f"{sample}/{sample}.sv.vep.vcf.gz",f"{sample}/{sample}.sv.vep.svdb.vcf",config['tools']['svdb']['database'],svdb)
 		svdb_query_job=Slurm("svdb_query", {"account": account, "ntasks": "2","time":"1-00:00:00","dependency":f"afterok:{vep_sv_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 		svdb_query_job_id=svdb_query_job.run(svdb_query_cmd)
 
@@ -240,6 +247,10 @@ def main():
 	print(whatshap_haplotag_cmd)
 	whatshap_haplotag_job=Slurm("whatshap_haplotag", {"account": account, "ntasks": "4","time":"1-00:00:00","dependency":f"afterok:{whatshap_phase_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	whatshap_haplotag_job_id=whatshap_haplotag_job.run(whatshap_haplotag_cmd)
+
+	methylartist_wgmeth_phased_cmd=methylartist_wgmeth_phased(f"{sample}/{sample}.happlotagged.bam",ref,methylartist,16)
+	methylartist_wgmeth_phased_job_id=submit_job(methylartist_wgmeth_phased_cmd, "methylartist_wgmeth",
+	{"account": account, "ntasks": processes['methylartist_wgmeth']['cores'],"time":processes['methylartist_wgmeth']['time'],"dependency":f"afterok:{whatshap_haplotag_job_id}" },sample)
 
 	vep_cmd=vep_annotation(sample,f"{sample}/{sample}.whatshap.vcf.gz",f"{sample}/{sample}.vcf",vep,vep_options,bcftools,bgzip)
 	vep_job=Slurm("vep_annotation", {"account": account, "ntasks": "16","time":"1-00:00:00","dependency":f"afterok:{whatshap_phase_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
