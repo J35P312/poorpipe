@@ -53,7 +53,17 @@
 		}
 
 	},
-	
+
+	"processes":{
+		"align":{
+			"cores":"20",
+			"time":"3-00:00:00"
+		},
+		"methylartist_wgmeth":{
+			"cores":"16",
+			"time":"1-00:00:00"
+		}
+	},
 	"singularity":{"options":"--bind /home/proj/"},
 	"reference":"/home/proj/production/rare-disease/references/references_12.0/grch37_homo_sapiens_-d5-.fasta"
 
