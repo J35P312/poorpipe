@@ -1,4 +1,4 @@
-def align(input_folder,sample,ref,samtools):
+def align(input_folder,sample,ref,samtools,readlength_script):
 	prefix=sample
 	bam2fastq=[]
 
@@ -15,6 +15,7 @@ def align(input_folder,sample,ref,samtools):
 
 parallel --tmpdir {sample}/tmp -j 20 < {prefix}/parallel_fastq.txt
 cat {sample}/fastq/* > {prefix}/{prefix}.fastq.gz
+python {readlength_script} {prefix}/{prefix}.fastq.gz > {prefix}/{prefix}_mqc.txt
 minimap2 -R "@RG\\tID:{prefix}\\tSM:{prefix}" -a -y -t 16 --MD -x map-ont {ref} {prefix}/{prefix}.fastq.gz | {samtools} sort -T {sample}/tmp/{sample}.samtools -m 5G -@8 - > {prefix}/{prefix}.bam
 {samtools} index -@16  {prefix}/{prefix}.bam
 {samtools} stats {prefix}/{prefix}.bam > {prefix}/{prefix}.bam.stats.txt
