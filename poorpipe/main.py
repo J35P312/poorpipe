@@ -1,5 +1,6 @@
 from slurmpy import Slurm
 import sys
+import time
 import os
 import glob
 import json
@@ -46,7 +47,7 @@ vep_sv_options=config["tools"]["vep"]["vep_sv"]
 ref=config["reference"]
 
 def tiddit_coverage(bam,tiddit):
-	cmd=f"{tiddit} --cov --bam {bam} -o {bam}"
+	cmd=f"{tiddit} --cov --bam {bam} -o {bam}\n{tiddit} --cov --bam {bam} -z 10000 -o {bam}.10kbp -w "
 	return(cmd)
 
 def methylartist_wgmeth(bam,ref,methylartist,cores):
@@ -57,7 +58,7 @@ def methylartist_wgmeth(bam,ref,methylartist,cores):
 	return(cmd)
 
 def methylartist_wgmeth_phased(bam,ref,methylartist,cores):
-	cmd=f"{methylartist} wgmeth -b {bam} -r {ref} -f {ref}.fai  --motif CG --mod m --primary_only -p {cores} -q 0 --phased -o {bam}.happlotagged.m.methyl.bed"
+	cmd=f"{methylartist} wgmeth -b {bam} -r {ref} -f {ref}.fai  --motif CG --mod m --primary_only -p {cores} -q 0 --phased --dss"
 	return(cmd)
 
 def target_type(bam,sample,ref,trgt_repeats,trgt,samtools):
@@ -121,12 +122,12 @@ def nanostats_qc(bam,sample,nanostats):
 	cmd=f"{nanostats} --bam {bam} > {sample}/{sample}.nanostats.tsv"
 	return(cmd)
 
-def fastqc_qc(sample,fastqc):
-	cmd=f"{fastqc} --memory 5000 -t 16 -o {sample} {sample}/{sample}.fastq.gz --dir {sample}/tmp/"
-	return(cmd)
+#def fastqc_qc(sample,fastqc):
+#	cmd=f"{fastqc} --memory 5000 -t 16 -o {sample} {sample}/{sample}.fastq.gz --dir {sample}/tmp/ --min_length 500"
+#	return(cmd)
 
 def multiqc_collect(sample,multiqc):
-	cmd=f"{multiqc} {sample} --cl-config \"log_filesize_limit: 2000000000\" --outdir {sample}"
+	cmd=f"{multiqc} {sample} --cl-config \"log_filesize_limit: 2000000000\" --outdir {sample} --ignore \"*tmp/\" --ignore \"*fastq/\""
 	return(cmd)
 
 def vep_annotation(sample,in_vcf,out_vcf,vep,vep_options,bcftools,bgzip):
@@ -147,11 +148,29 @@ def submit_job(cmd,job_name,slurm_settings,sample):
 	job_id=job.run(cmd)
 	return(job_id)
 
+def get_chromosomes(fai):
+	chromosomes=[]
+	min_size=50000
+	for line in open(fai):
+		content=line.strip()
+
+	return(chromosomes)
+
+def finnish(sample,status,jobs):
+	j=",".join(list(map(str,jobs)))
+
+	cmd=f"""
+sacct --format=jobid,jobname%50,account,partition,alloccpus,TotalCPU,elapsed,start,end,state,exitcode --jobs {j} | perl -nae 'my @headers=(jobid,jobname,account,partition,alloccpus,TotalCPU,elapsed,start,end,state,exitcode); if($. == 1) {{ print q{{#}} . join(qq{{\\t}}, @headers), qq{{\\n}} }} if ($. >= 3 && $F[0] !~ /( .batch | .bat+ )\\b/xms) {{ print join(qq{{\\t}}, @F), qq{{\\n}} }}' > {status}
+"""
+	return(cmd)
+
+
 def main():
 
 	input_folder=sys.argv[1]
 	sample=sys.argv[2]
 	bam=f"{sample}/{sample}.bam"
+	jobs=[]
 
 	try:
 		os.system(f"mkdir {sample}")
@@ -170,48 +189,63 @@ def main():
 	ubam_path.write("\n".join(glob.glob(f"{input_folder}/*bam")))
 	ubam_path.close()
 
-	align_cmd=align(input_folder,sample,ref,samtools)
+	wd=os.path.dirname(os.path.realpath(__file__))
+
+	readlength_script=f"{wd}/utils/seqlen.py"
+	align_cmd=align(input_folder,sample,ref,samtools,readlength_script)
 	align_job_id=submit_job(align_cmd,"align",{"account": account, "ntasks":processes['align']['cores'],"time":processes['align']['time'] },sample)
+	jobs.append(align_job_id)
 
 	methylartist_wgmeth_cmd=methylartist_wgmeth(bam,ref,methylartist,16)
 	methylartist_wgmeth_job_id=submit_job(methylartist_wgmeth_cmd, "methylartist_wgmeth",
 	{"account": account, "ntasks": processes['methylartist_wgmeth']['cores'],"time":processes['methylartist_wgmeth']['time'],"dependency":f"afterok:{align_job_id}" },sample)
+	jobs.append(methylartist_wgmeth_job_id)
+
 
 	tiddit_cov_cmd=tiddit_coverage(bam,tiddit)
 	tiddit_cov_job=Slurm("tiddit", {"account": account, "ntasks": "2","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	tiddit_cov_job_id=tiddit_cov_job.run(tiddit_cov_cmd)
+	jobs.append(tiddit_cov_job_id)
 
 	sniffles_cmd=sniffles_sv(bam,sample,sniffles)
 	print(sniffles_cmd)
 	sniffles_job=Slurm("sniffles", {"account": account, "ntasks": "16","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	sniffles_job_id=sniffles_job.run(sniffles_cmd)
+	jobs.append(sniffles_job_id)
 
 	picard_cmd=picard_qc(bam,sample,ref,picard)
 	print(picard_cmd)
 	picard_job=Slurm("picard", {"account": account, "ntasks": "8","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	picard_job_id=picard_job.run(picard_cmd)
+	jobs.append(picard_job_id)
 
 	picard_gc_cmd=picard_gc(bam,sample,ref,picard,samtools)
 	picard_gc_job=Slurm("picard_gc", {"account": account, "ntasks": "8","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	picard_gc_job_id=picard_gc_job.run(picard_gc_cmd)
+	jobs.append(picard_gc_job_id)
 
 	pytor_cmd=cnvpytor_call(bam,sample,ref,pytor)
 	print(pytor_cmd)
 	pytor_job=Slurm("cnvpytor", {"account": account, "ntasks": "4","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	pytor_job_id=pytor_job.run(pytor_cmd)
+	jobs.append(pytor_job_id)
+
 
 	trgt_cmd=target_type(bam,sample,ref,trgt_repeats,trgt,samtools)
 	print(trgt_cmd)
 	trgt_job=Slurm("trgt", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	trgt_job_id=trgt_job.run(trgt_cmd)
+	jobs.append(trgt_job_id)
+
 
 	dv_jobs=[]
 	chromosomes=list(range(1,23))+["X","Y","MT"]
 	for chromosome in chromosomes:
 		dv_cmd=deepvariant_call_chr(bam,sample,ref,deepvariant,chromosome)
 		print(dv_cmd)
-		dv_job=Slurm(f"deepvariant_{chromosome}", {"account": account, "ntasks": "16","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+		dv_job=Slurm(f"deepvariant_{chromosome}", {"account": account, "ntasks": "20","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 		dv_jobs.append(dv_job.run(dv_cmd))
+	jobs+=dv_jobs
 
 	bcftools_cmd=bcftools_concat(sample,ref,bcftools)
 	print(bcftools_cmd)
@@ -219,56 +253,75 @@ def main():
 	dv_jobs=":".join(map(str,dv_jobs))
 	bcftools_concat_job=Slurm("concat", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{dv_jobs}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	bcftools_concat_job_id=bcftools_concat_job.run(bcftools_cmd)
+	jobs.append(bcftools_concat_job_id)
+
 
 	pytor_baf_cmd=cnvpytor_baf(bam,sample,ref,pytor)
 	pytor_baf_job=Slurm("cnvpytor_baf", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{bcftools_concat_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	pytor_baf_job_id=pytor_baf_job.run(pytor_baf_cmd)
+	jobs.append(pytor_baf_job_id)
+
 
 	svdb_merge_cmd=svdb_merge(f"{sample}/{sample}.pytor.vcf",f"{sample}/{sample}.snf.vcf",svdb,sample)
 	svdb_merge_job=Slurm("svdb_merge", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{pytor_job_id}:{sniffles_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	svdb_merge_job_id=svdb_merge_job.run(svdb_merge_cmd)
+	jobs.append(svdb_merge_job_id)
+
 
 	vep_sv_cmd=vep_annotation(sample,f"{sample}/{sample}.sv.vcf",f"{sample}/{sample}.sv.vep.vcf",vep,vep_sv_options,bcftools,bgzip)
 	vep_sv_job=Slurm("vep_sv_annotation", {"account": account, "ntasks": "16","time":"1-00:00:00","dependency":f"afterok:{svdb_merge_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	vep_sv_job_id=vep_sv_job.run(vep_sv_cmd)
-
+	jobs.append(vep_sv_job_id)
 
 	if not "" == config['tools']['svdb']['database']:
 		svdb_query_cmd=svdb_query(f"{sample}/{sample}.sv.vep.vcf.gz",f"{sample}/{sample}.sv.vep.svdb.vcf",config['tools']['svdb']['database'],svdb)
 		svdb_query_job=Slurm("svdb_query", {"account": account, "ntasks": "2","time":"1-00:00:00","dependency":f"afterok:{vep_sv_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 		svdb_query_job_id=svdb_query_job.run(svdb_query_cmd)
+		jobs.append(svdb_query_job_id)
 
 	whatshap_phase_cmd=whatshap_phase(bam,sample,ref,bcftools,whatshap)
 	print(whatshap_phase_cmd)
 	whatshap_phase_job=Slurm("whatshap_phase", {"account": account, "ntasks": "4","time":"1-00:00:00","dependency":f"afterok:{bcftools_concat_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	whatshap_phase_job_id=whatshap_phase_job.run(whatshap_phase_cmd)
+	jobs.append(whatshap_phase_job_id)
 
 	whatshap_haplotag_cmd=whatshap_haplotag(bam,sample,ref,samtools,whatshap)
 	print(whatshap_haplotag_cmd)
 	whatshap_haplotag_job=Slurm("whatshap_haplotag", {"account": account, "ntasks": "4","time":"1-00:00:00","dependency":f"afterok:{whatshap_phase_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	whatshap_haplotag_job_id=whatshap_haplotag_job.run(whatshap_haplotag_cmd)
+	jobs.append(whatshap_haplotag_job_id)
 
 	methylartist_wgmeth_phased_cmd=methylartist_wgmeth_phased(f"{sample}/{sample}.happlotagged.bam",ref,methylartist,16)
 	methylartist_wgmeth_phased_job_id=submit_job(methylartist_wgmeth_phased_cmd, "methylartist_wgmeth",
 	{"account": account, "ntasks": processes['methylartist_wgmeth']['cores'],"time":processes['methylartist_wgmeth']['time'],"dependency":f"afterok:{whatshap_haplotag_job_id}" },sample)
+	jobs.append(methylartist_wgmeth_phased_job_id)
 
 	vep_cmd=vep_annotation(sample,f"{sample}/{sample}.whatshap.vcf.gz",f"{sample}/{sample}.vcf",vep,vep_options,bcftools,bgzip)
 	vep_job=Slurm("vep_annotation", {"account": account, "ntasks": "16","time":"1-00:00:00","dependency":f"afterok:{whatshap_phase_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	vep_job_id=vep_job.run(vep_cmd)
+	jobs.append(vep_job_id)
 
 	nanostats_cmd=nanostats_qc(bam,sample,nanostats)
 	print(nanostats_cmd)
 	nanostats_job=Slurm("nanostat", {"account": account, "ntasks": "8","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	nanostats_job_id=nanostats_job.run(nanostats_cmd)
-
-	fastqc_qc_cmd=fastqc_qc(sample,fastqc)
-	print(fastqc_qc_cmd)
-	fastqc_qc_job=Slurm("fastqc", {"account": account, "ntasks": "16","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
-	fastqc_qc_job_id=fastqc_qc_job.run(fastqc_qc_cmd)
+	jobs.append(nanostats_job_id)
 
 	multiqc_cmd=multiqc_collect(sample,multiqc)
 	print(multiqc_cmd)
-	multiqc_job=Slurm("multiqc", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{fastqc_qc_job_id}:{whatshap_phase_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	multiqc_job=Slurm("multiqc", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{whatshap_phase_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	multiqc_job_id=multiqc_job.run(multiqc_cmd)
+	jobs.append(multiqc_job_id)
+
+	complete_cmd=finnish(sample,f"{sample}/complete",jobs)
+	complete_job=Slurm(f"complete-{sample}", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{multiqc_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	complete_job_id=complete_job.run(complete_cmd)
+
+	fail_cmd=finnish(sample,f"{sample}/fail",jobs)
+	fail_job=Slurm(f"fail-{sample}", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afternotok:{multiqc_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	fail_job_id=fail_job.run(fail_cmd)
+
+	time.sleep(10)
+	os.system(finnish(sample,f"{sample}/submitted",jobs))
 
 main()
