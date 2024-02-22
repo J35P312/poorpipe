@@ -36,11 +36,14 @@ bgzip       =f"{singularity_cmd} { config['tools']['bcftools']['singularity'] } 
 svdb        =f"{singularity_cmd} { config['tools']['svdb']['singularity'] } svdb"
 tiddit      =f"{singularity_cmd} { config['tools']['tiddit']['singularity'] } tiddit"
 methylartist=f"{singularity_cmd} { config['tools']['methylartist']['singularity']} methylartist"
+genmod      =f"{singularity_cmd} { config['tools']['genmod']['singularity']} genmod"
+genmod_rank_model =config['tools']['genmod']["rank_model"]
 
 trgt=config["tools"]["trgt"]["binary"]
 trgt_repeats=config["tools"]["trgt"]["repeat_catalog"]
 
 vep="{} {} vep".format( singularity_cmd,config["tools"]["vep"]["singularity"] )
+filter_vep="{} {} filter_vep".format( singularity_cmd,config["tools"]["vep"]["singularity"] )
 vep_options=config["tools"]["vep"]["vep_snv"]
 vep_sv_options=config["tools"]["vep"]["vep_sv"]
 
@@ -139,6 +142,23 @@ def vep_annotation(sample,in_vcf,out_vcf,vep,vep_options,bcftools,bgzip):
 """
 	return(cmd)
 
+def genmod_rank_snv(in_vcf,out_vcf,sample,family,filter_vep,bcftools,genmod_rank_model,genmod,bgzip):
+
+	filter_vep_vcf=in_vcf.replace(".vcf.gz",".filter_vep.vcf")
+	bcftools_quality=in_vcf.replace(".vcf.gz",".hiq.vcf.gz")
+	genmod_models_vcf=in_vcf.replace(".vcf.gz",".genmod_models.vcf")
+
+	cmd=f"""
+{bcftools} view -e 'FMT/GQ < 10 | FMT/AD < 3 | INFO/AF > 0.05' {in_vcf} -o {bcftools_quality}
+{genmod} annotate {bcftools_quality} --annotate_regions | {genmod} models - -f {sample}/{family}.fam  -t ped -p 10 -o {genmod_models_vcf}
+{genmod} score -f {sample}/{family}.fam -t ped -c {genmod_rank_model} -r {genmod_models_vcf} -o {out_vcf}
+
+{bgzip} -f {out_vcf}
+{bcftools} index {out_vcf}.gz
+
+"""
+	return(cmd)
+
 def svdb_query(in_vcf,out_vcf,db,svdb):
 	cmd=f"{svdb} --query --query_vcf {in_vcf} --overlap 0.5 --bnd_distance 10000 --db {db} > {out_vcf}"
 	return(cmd)
@@ -169,6 +189,7 @@ def main():
 
 	input_folder=sys.argv[1]
 	sample=sys.argv[2]
+	family=sys.argv[4]
 	bam=f"{sample}/{sample}.bam"
 	jobs=[]
 
@@ -185,14 +206,20 @@ def main():
 	except:
 		pass
 
+
 	ubam_path=open(f"{sample}/bam_input.txt","w")
 	ubam_path.write("\n".join(glob.glob(f"{input_folder}/*bam")))
 	ubam_path.close()
 
+	sample_id_path=open(f"{sample}/sample_id.txt","w")
+	sample_id_path.write(f"{sample}")
+	sample_id_path.close()
+
 	wd=os.path.dirname(os.path.realpath(__file__))
 
 	readlength_script=f"{wd}/utils/seqlen.py"
-	align_cmd=align(input_folder,sample,ref,samtools,readlength_script)
+	generate_ped_script=f"{wd}/utils/make_ped.py"
+	align_cmd=align(input_folder,sample,family,ref,samtools,readlength_script,generate_ped_script)
 	align_job_id=submit_job(align_cmd,"align",{"account": account, "ntasks":processes['align']['cores'],"time":processes['align']['time'] },sample)
 	jobs.append(align_job_id)
 
@@ -207,7 +234,7 @@ def main():
 	tiddit_cov_job_id=tiddit_cov_job.run(tiddit_cov_cmd)
 	jobs.append(tiddit_cov_job_id)
 
-	sniffles_cmd=sniffles_sv(bam,sample,sniffles)
+	sniffles_cmd=sniffles_sv(bam,sample,sniffles,bcftools)
 	print(sniffles_cmd)
 	sniffles_job=Slurm("sniffles", {"account": account, "ntasks": "16","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	sniffles_job_id=sniffles_job.run(sniffles_cmd)
@@ -300,6 +327,12 @@ def main():
 	vep_job=Slurm("vep_annotation", {"account": account, "ntasks": "16","time":"1-00:00:00","dependency":f"afterok:{whatshap_phase_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	vep_job_id=vep_job.run(vep_cmd)
 	jobs.append(vep_job_id)
+
+	genmod_cmd=genmod_rank_snv(f"{sample}/{sample}.vcf.gz",f"{sample}/{sample}.scored.vcf",sample,family,filter_vep,bcftools,genmod_rank_model,genmod,bgzip)
+	genmod_job=Slurm("genmod_annotation", {"account": account, "ntasks": "2","time":"1-00:00:00","dependency":f"afterok:{vep_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	genmod_job_id=genmod_job.run(genmod_cmd)
+	jobs.append(genmod_job_id)
+
 
 	nanostats_cmd=nanostats_qc(bam,sample,nanostats)
 	print(nanostats_cmd)
