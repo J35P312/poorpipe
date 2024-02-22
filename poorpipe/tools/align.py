@@ -1,4 +1,4 @@
-def align(input_folder,sample,ref,samtools,readlength_script):
+def align(input_folder,sample,family,ref,samtools,readlength_script,generate_ped_script):
 	prefix=sample
 	bam2fastq=[]
 
@@ -18,7 +18,9 @@ cat {sample}/fastq/* > {prefix}/{prefix}.fastq.gz
 python {readlength_script} {prefix}/{prefix}.fastq.gz > {prefix}/{prefix}_mqc.txt
 minimap2 -R "@RG\\tID:{prefix}\\tSM:{prefix}" -a -y -t 16 --MD -x map-ont {ref} {prefix}/{prefix}.fastq.gz | {samtools} sort -T {sample}/tmp/{sample}.samtools -m 5G -@8 - > {prefix}/{prefix}.bam
 {samtools} index -@16  {prefix}/{prefix}.bam
+{samtools} idxstats {prefix}/{prefix}.bam > {prefix}/{prefix}.bam.bai.stats.txt
 {samtools} stats {prefix}/{prefix}.bam > {prefix}/{prefix}.bam.stats.txt
+python {generate_ped_script} {sample} {family} {prefix}/{prefix}.bam.bai.stats.txt
 """
 	return(cmd)
 
