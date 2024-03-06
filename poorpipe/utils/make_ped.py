@@ -22,6 +22,12 @@ if X and Y:
 		if chromosomes[Y]/chromosomes[X] > 0.2:
 			sex=1
 
+if sex == 2:
+	print("female")
+else:
+	print("male")
+
+
 ped=open(f"{sample}/{family}.fam","w")
 ped.write(f"#family_id\tsample_id\tfather\tmother\tsex\tphenotype\n")
 ped.write(f"{family}\t{sample}\t0\t0\t{sex}\t2")

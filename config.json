@@ -16,13 +16,16 @@
 		},
 		"genmod":{
 			"singularity": "singularity/genmod_3.7.4--pyh5e36f6f_0.sif",
-			"rank_model":"genmod/rank_model_-v1.36-.ini"
-
+			"rank_model":"genmod/rank_model_-v1.36-.ini",
+			"sv_rank_model":"poorpipe/svrank_model_-v1.9-.ini"
 		},
 		"vep":{
 			"singularity":"singularity/ensembl-vep_107.0--pl5321h4a94de4_0.sif",
 			"vep_snv":"--af_gnomadg --af_1kg --assembly GRCh37 --dir_cache /home/proj/development/rare-disease/ONT/analysis/poorpipe/references/ensembl-tools-release-107/cache/ --sift b --symbol --hgvs --clin_sig_allele 1 --polyphen b --merged --offline --plugin SpliceAI,snv=/home/proj/production/rare-disease/references/references_12.0/grch37_spliceai_scores_raw_snv_-v1.3-.vcf.gz,indel=/home/proj/production/rare-disease/references/references_12.0/grch37_spliceai_scores_raw_indel_-v1.3-.vcf.gz --plugin CADD,databases/whole_genome_SNVs.tsv.gz,databases/InDels.tsv.gz --plugin dbNSFP,/home/proj/production/rare-disease/references/references_12.0/grch37_dbnsfp_-v3.5a-.txt.gz,ALL --mirna --regulatory --gene_phenotype",
 			"vep_sv":"--assembly GRCh37 --dir_cache /home/proj/development/rare-disease/ONT/analysis/poorpipe/references/ensembl-tools-release-107/cache/ --symbol --hgvs --merged --offline --max_sv_size 300000000 --per_gene --mirna --regulatory --gene_phenotype"
+		},
+		"vcf2cytosure":{
+			"singularity":"singularity/vcf2cytosure_v0.8.sif"
 		},
 		"multiqc":{
 			"singularity":"singularity/multiqc_1.18--pyhdfd78af_0.sif"
@@ -55,8 +58,10 @@
 		},
 		"whatshap":{
 			"singularity":"singularity/whatshap_2.1--py39h1f90b4d_0.sif"
+		},
+		"vcftools":{
+			"singularity":"singularity/vcftools_0.1.16--pl5321hdcf5f25_9.sif"
 		}
-
 	},
 
 	"processes":{
@@ -70,7 +75,7 @@
 		}
 	},
 	"singularity":{"options":"--bind /home/proj/"},
-	"reference":"//home/proj/development/rare-disease/ONT/analysis/poorpipe/references/grch37_homo_sapiens_-d5-.fasta"
+	"reference":"//home/proj/development/rare-disease/ONT/analysis/poorpipe/references/human_g1k_v37.fasta"
 
 }
 

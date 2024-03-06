@@ -13,7 +13,6 @@ from tools.sniffles import sniffles_sv
 with open(sys.argv[3]) as config_file:
 	config = json.load(config_file)
 
-
 #extract slurm config
 account=config["slurm"]["account"]
 processes=config["processes"]
@@ -26,6 +25,7 @@ samtools    =f"{singularity_cmd} { config['tools']['samtools']['singularity'] } 
 sniffles    =f"{singularity_cmd} { config['tools']['sniffles']['singularity'] } sniffles"
 picard      =f"{singularity_cmd} { config['tools']['picard']['singularity'] } picard"
 pytor       =f"{singularity_cmd} { config['tools']['cnvpytor']['singularity'] } cnvpytor"
+cytosure    =f"{singularity_cmd} { config['tools']['vcf2cytosure']['singularity'] } vcf2cytosure"
 deepvariant =f"{singularity_cmd} { config['tools']['deepvariant']['singularity'] }"
 bcftools    =f"{singularity_cmd} { config['tools']['bcftools']['singularity'] } bcftools"
 nanostats   =f"{singularity_cmd} { config['tools']['nanostats']['singularity'] } NanoStat"
@@ -36,8 +36,10 @@ bgzip       =f"{singularity_cmd} { config['tools']['bcftools']['singularity'] } 
 svdb        =f"{singularity_cmd} { config['tools']['svdb']['singularity'] } svdb"
 tiddit      =f"{singularity_cmd} { config['tools']['tiddit']['singularity'] } tiddit"
 methylartist=f"{singularity_cmd} { config['tools']['methylartist']['singularity']} methylartist"
+vcfsort     =f"{singularity_cmd} { config['tools']['vcftools']['singularity']} vcf-sort"
 genmod      =f"{singularity_cmd} { config['tools']['genmod']['singularity']} genmod"
 genmod_rank_model =config['tools']['genmod']["rank_model"]
+genmod_sv_rank_model =config['tools']['genmod']["sv_rank_model"]
 
 trgt=config["tools"]["trgt"]["binary"]
 trgt_repeats=config["tools"]["trgt"]["repeat_catalog"]
@@ -64,6 +66,17 @@ def methylartist_wgmeth_phased(bam,ref,methylartist,cores):
 	cmd=f"{methylartist} wgmeth -b {bam} -r {ref} -f {ref}.fai  --motif CG --mod m --primary_only -p {cores} -q 0 --phased --dss"
 	return(cmd)
 
+def cytosure_cgh(sample,coverage_bed,sv_vcf,cytosure):
+
+	pytor_vcf=sv_vcf.replace(".vcf.gz","pytor.vcf")
+
+	cmd=f"""
+zgrep -E 'pytor|#' {sv_vcf} > {pytor_vcf}
+sex==$(cat {sample}/{sample}.gender.txt)
+{cytosure} --size 5000 --frequency 0.1 --coverage {coverage_bed} --vcf {pytor_vcf} --genome 37 --bins 40 --sex $sex
+"""
+	return(cmd)
+
 def target_type(bam,sample,ref,trgt_repeats,trgt,samtools):
 	cmd=f"""
 {samtools} view {bam} -bh -x MM -x ML >  {bam}.nometh.bam
@@ -76,7 +89,7 @@ def picard_qc(bam,sample,ref,picard):
 	return(cmd)
 
 def svdb_merge(pytor,sniffles,svdb,sample):
-	cmd=f"{svdb} --merge --vcf {pytor} {sniffles} --no_var --no_intra --bnd_distance 5000 --overlap 0.5 > {sample}/{sample}.sv.vcf"
+	cmd=f"{svdb} --merge --vcf {pytor}:cnvpytor {sniffles}:sniffles --priority sniffles,cnvpytor --no_var --no_intra --bnd_distance 5000 --overlap 0.5 > {sample}/{sample}.sv.vcf"
 	return(cmd)
 
 def picard_gc(bam,sample,ref,picard,samtools):
@@ -125,17 +138,13 @@ def nanostats_qc(bam,sample,nanostats):
 	cmd=f"{nanostats} --bam {bam} > {sample}/{sample}.nanostats.tsv"
 	return(cmd)
 
-#def fastqc_qc(sample,fastqc):
-#	cmd=f"{fastqc} --memory 5000 -t 16 -o {sample} {sample}/{sample}.fastq.gz --dir {sample}/tmp/ --min_length 500"
-#	return(cmd)
-
 def multiqc_collect(sample,multiqc):
 	cmd=f"{multiqc} {sample} --cl-config \"log_filesize_limit: 2000000000\" --outdir {sample} --ignore \"*tmp/\" --ignore \"*fastq/\""
 	return(cmd)
 
 def vep_annotation(sample,in_vcf,out_vcf,vep,vep_options,bcftools,bgzip):
 	cmd=f"""
-{vep} --offline --cache -i {in_vcf} -o {out_vcf} --force_overwrite --fork 16 --vcf {vep_options}
+{vep} --offline --cache -i {in_vcf} -o {out_vcf} --force_overwrite --fork 16 --vcf {vep_options} --format vcf
 {bgzip} -f {out_vcf}
 {bcftools} index {out_vcf}.gz
 
@@ -153,6 +162,24 @@ def genmod_rank_snv(in_vcf,out_vcf,sample,family,filter_vep,bcftools,genmod_rank
 {genmod} annotate {bcftools_quality} --annotate_regions | {genmod} models - -f {sample}/{family}.fam  -t ped -p 10 -o {genmod_models_vcf}
 {genmod} score -f {sample}/{family}.fam -t ped -c {genmod_rank_model} -r {genmod_models_vcf} -o {out_vcf}
 
+{bgzip} -f {out_vcf}
+{bcftools} index {out_vcf}.gz
+
+"""
+	return(cmd)
+
+def genmod_rank_sv(in_vcf,out_vcf,sample,family,filter_vep,bcftools,genmod_rank_model,genmod,bgzip,vcfsort):
+
+	bcftools_quality=in_vcf.replace(".sv.vep.svdb.vcf",".sv.hiq.vcf.gz")
+	genmod_models_vcf=in_vcf.replace(".sv.vep.svdb.vcf",".sv.genmod_models.vcf")
+
+	cmd=f"""
+{bcftools} view -e 'INFO/FRQ > 0.1' {in_vcf} -o {bcftools_quality}
+{genmod} annotate {bcftools_quality} --annotate_regions | {genmod} models - -f {sample}/{family}.fam  -t ped -p 10 -o {genmod_models_vcf}
+{genmod} score -f {sample}/{family}.fam -t ped -c {genmod_rank_model} -r {genmod_models_vcf} -o {out_vcf}
+
+{vcfsort} {out_vcf} > {out_vcf}.tmp
+mv {out_vcf}.tmp {out_vcf}
 {bgzip} -f {out_vcf}
 {bcftools} index {out_vcf}.gz
 
@@ -234,7 +261,7 @@ def main():
 	tiddit_cov_job_id=tiddit_cov_job.run(tiddit_cov_cmd)
 	jobs.append(tiddit_cov_job_id)
 
-	sniffles_cmd=sniffles_sv(bam,sample,sniffles,bcftools)
+	sniffles_cmd=sniffles_sv(bam,sample,sniffles,bcftools,wd)
 	print(sniffles_cmd)
 	sniffles_job=Slurm("sniffles", {"account": account, "ntasks": "16","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	sniffles_job_id=sniffles_job.run(sniffles_cmd)
@@ -282,7 +309,6 @@ def main():
 	bcftools_concat_job_id=bcftools_concat_job.run(bcftools_cmd)
 	jobs.append(bcftools_concat_job_id)
 
-
 	pytor_baf_cmd=cnvpytor_baf(bam,sample,ref,pytor)
 	pytor_baf_job=Slurm("cnvpytor_baf", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{bcftools_concat_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	pytor_baf_job_id=pytor_baf_job.run(pytor_baf_cmd)
@@ -305,6 +331,17 @@ def main():
 		svdb_query_job=Slurm("svdb_query", {"account": account, "ntasks": "2","time":"1-00:00:00","dependency":f"afterok:{vep_sv_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 		svdb_query_job_id=svdb_query_job.run(svdb_query_cmd)
 		jobs.append(svdb_query_job_id)
+
+		genmod_sv_cmd=genmod_rank_sv(f"{sample}/{sample}.sv.vep.svdb.vcf",f"{sample}/{sample}.sv.scored.vcf",sample,family,filter_vep,bcftools,genmod_sv_rank_model,genmod,bgzip,vcfsort)
+		genmod_sv_job=Slurm("genmod_sv_annotation", {"account": account, "ntasks": "2","time":"1-00:00:00","dependency":f"afterok:{svdb_query_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+		genmod_sv_job_id=genmod_sv_job.run(genmod_sv_cmd)
+		jobs.append(genmod_sv_job_id)
+
+		cytosure_cmd=cytosure_cgh(sample,f"{bam}.bed",f"{sample}/{sample}.sv.scored.vcf.gz",cytosure)
+		cytosure_job=Slurm("cytosure_cgh", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{genmod_sv_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+		cytosure_job_id=cytosure_job.run(cytosure_cmd)
+		jobs.append(cytosure_job_id)
+
 
 	whatshap_phase_cmd=whatshap_phase(bam,sample,ref,bcftools,whatshap)
 	print(whatshap_phase_cmd)
@@ -332,7 +369,6 @@ def main():
 	genmod_job=Slurm("genmod_annotation", {"account": account, "ntasks": "2","time":"1-00:00:00","dependency":f"afterok:{vep_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	genmod_job_id=genmod_job.run(genmod_cmd)
 	jobs.append(genmod_job_id)
-
 
 	nanostats_cmd=nanostats_qc(bam,sample,nanostats)
 	print(nanostats_cmd)
