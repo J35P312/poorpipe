@@ -20,7 +20,7 @@ minimap2 -R "@RG\\tID:{prefix}\\tSM:{prefix}" -a -y -t 16 --MD -x map-ont {ref} 
 {samtools} index -@16  {prefix}/{prefix}.bam
 {samtools} idxstats {prefix}/{prefix}.bam > {prefix}/{prefix}.bam.bai.stats.txt
 {samtools} stats {prefix}/{prefix}.bam > {prefix}/{prefix}.bam.stats.txt
-python {generate_ped_script} {sample} {family} {prefix}/{prefix}.bam.bai.stats.txt
+python {generate_ped_script} {sample} {family} {prefix}/{prefix}.bam.bai.stats.txt > {prefix}/{prefix}.gender.txt
 """
 	return(cmd)
 
