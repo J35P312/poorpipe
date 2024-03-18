@@ -36,6 +36,7 @@ bgzip       =f"{singularity_cmd} { config['tools']['bcftools']['singularity'] } 
 svdb        =f"{singularity_cmd} { config['tools']['svdb']['singularity'] } svdb"
 tiddit      =f"{singularity_cmd} { config['tools']['tiddit']['singularity'] } tiddit"
 methylartist=f"{singularity_cmd} { config['tools']['methylartist']['singularity']} methylartist"
+minimap2    =f"{singularity_cmd} { config['tools']['minimap2']['singularity']} minimap2"
 vcfsort     =f"{singularity_cmd} { config['tools']['vcftools']['singularity']} vcf-sort"
 genmod      =f"{singularity_cmd} { config['tools']['genmod']['singularity']} genmod"
 genmod_rank_model =config['tools']['genmod']["rank_model"]
@@ -100,10 +101,10 @@ def picard_gc(bam,sample,ref,picard,samtools):
 """
 	return(cmd)
 
-def deepvariant_call_chr(bam,sample,ref,deepvariant,chromosome):
+def deepvariant_call_chr(bam,sample,ref,deepvariant,chromosome,model_type):
 	cmd=f"""
 TMPDIR={sample}/tmp/
-{deepvariant} run_deepvariant --output_vcf {sample}/{sample}/dv.{chromosome}.vcf --model_type ONT_R104 --num_shards 16 --reads {bam} --ref {ref} --regions {chromosome} --intermediate_results_dir {sample}/tmp/{chromosome}"""
+{deepvariant} run_deepvariant --output_vcf {sample}/{sample}/dv.{chromosome}.vcf --model_type {model_type} --num_shards 16 --reads {bam} --ref {ref} --regions {chromosome} --intermediate_results_dir {sample}/tmp/{chromosome}"""
 	return(cmd)
 
 def bcftools_concat(sample,ref,bcftools):
@@ -217,6 +218,15 @@ def main():
 	input_folder=sys.argv[1]
 	sample=sys.argv[2]
 	family=sys.argv[4]
+	if len(sys.argv) > 5:
+		method=sys.argv[5]
+	else:
+		method="ont"
+	if method != "ont" and method != "hifi":
+		print("ont and hifi supported")
+		quit()
+	
+
 	bam=f"{sample}/{sample}.bam"
 	jobs=[]
 
@@ -246,7 +256,7 @@ def main():
 
 	readlength_script=f"{wd}/utils/seqlen.py"
 	generate_ped_script=f"{wd}/utils/make_ped.py"
-	align_cmd=align(input_folder,sample,family,ref,samtools,readlength_script,generate_ped_script)
+	align_cmd=align(input_folder,sample,family,ref,samtools,readlength_script,generate_ped_script,minimap2,method)
 	align_job_id=submit_job(align_cmd,"align",{"account": account, "ntasks":processes['align']['cores'],"time":processes['align']['time'] },sample)
 	jobs.append(align_job_id)
 
@@ -295,7 +305,13 @@ def main():
 	dv_jobs=[]
 	chromosomes=list(range(1,23))+["X","Y","MT"]
 	for chromosome in chromosomes:
-		dv_cmd=deepvariant_call_chr(bam,sample,ref,deepvariant,chromosome)
+
+		if method == "ont":
+			model_type="ONT_R104"
+		else:
+			model_type="PACBIO"
+
+		dv_cmd=deepvariant_call_chr(bam,sample,ref,deepvariant,chromosome,model_type)
 		print(dv_cmd)
 		dv_job=Slurm(f"deepvariant_{chromosome}", {"account": account, "ntasks": "20","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 		dv_jobs.append(dv_job.run(dv_cmd))

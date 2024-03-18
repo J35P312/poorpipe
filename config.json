@@ -56,6 +56,9 @@
 		"methylartist":{
 			"singularity":"singularity/methylartist_1.2.11--pyhdfd78af_0.sif"
 		},
+		"minimap2":{
+			"singularity":"singularity/minimap2_2.26--he4a0461_2.sif"
+		},
 		"whatshap":{
 			"singularity":"singularity/whatshap_2.1--py39h1f90b4d_0.sif"
 		},
