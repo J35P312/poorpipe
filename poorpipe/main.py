@@ -35,7 +35,12 @@ whatshap    =f"{singularity_cmd} { config['tools']['whatshap']['singularity'] } 
 bgzip       =f"{singularity_cmd} { config['tools']['bcftools']['singularity'] } bgzip"
 svdb        =f"{singularity_cmd} { config['tools']['svdb']['singularity'] } svdb"
 tiddit      =f"{singularity_cmd} { config['tools']['tiddit']['singularity'] } tiddit"
+chopper      =f"{singularity_cmd} { config['tools']['chopper']['singularity'] } chopper"
 methylartist=f"{singularity_cmd} { config['tools']['methylartist']['singularity']} methylartist"
+
+paraphase=f"{singularity_cmd} { config['tools']['paraphase']['singularity']} paraphase"
+paraphase_genome=config['tools']['paraphase']['genome']
+
 minimap2    =f"{singularity_cmd} { config['tools']['minimap2']['singularity']} minimap2"
 vcfsort     =f"{singularity_cmd} { config['tools']['vcftools']['singularity']} vcf-sort"
 genmod      =f"{singularity_cmd} { config['tools']['genmod']['singularity']} genmod"
@@ -65,6 +70,10 @@ def methylartist_wgmeth(bam,ref,methylartist,cores):
 
 def methylartist_wgmeth_phased(bam,ref,methylartist,cores):
 	cmd=f"{methylartist} wgmeth -b {bam} -r {ref} -f {ref}.fai  --motif CG --mod m --primary_only -p {cores} -q 0 --phased --dss"
+	return(cmd)
+
+def paraphase_type(sample,ref,paraphase_genome,paraphase):
+	cmd=f"{paraphase} -b {sample}/{sample}.bam -r {ref} -o {sample}/paraphase --genome {paraphase_genome}"
 	return(cmd)
 
 def cytosure_cgh(sample,coverage_bed,sv_vcf,cytosure):
@@ -136,7 +145,7 @@ def whatshap_haplotag(bam,sample,ref,samtools,whatshap):
 	return(cmd)
 
 def nanostats_qc(bam,sample,nanostats):
-	cmd=f"{nanostats} --bam {bam} > {sample}/{sample}.nanostats.tsv"
+	cmd=f"{nanostats} --fastq {sample}/{sample}.fastq.gz > {sample}/{sample}.nanostats.tsv"
 	return(cmd)
 
 def multiqc_collect(sample,multiqc):
@@ -256,9 +265,14 @@ def main():
 
 	readlength_script=f"{wd}/utils/seqlen.py"
 	generate_ped_script=f"{wd}/utils/make_ped.py"
-	align_cmd=align(input_folder,sample,family,ref,samtools,readlength_script,generate_ped_script,minimap2,method)
+	align_cmd=align(input_folder,sample,family,ref,samtools,readlength_script,generate_ped_script,minimap2,chopper,method)
 	align_job_id=submit_job(align_cmd,"align",{"account": account, "ntasks":processes['align']['cores'],"time":processes['align']['time'] },sample)
 	jobs.append(align_job_id)
+
+	paraphase_type_cmd=paraphase_type(sample,ref,paraphase_genome,paraphase)
+	paraphase_type_job_id=submit_job(paraphase_type_cmd, "paraphase_type",
+	{"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{align_job_id}" },sample)
+	jobs.append(paraphase_type_job_id)
 
 	methylartist_wgmeth_cmd=methylartist_wgmeth(bam,ref,methylartist,16)
 	methylartist_wgmeth_job_id=submit_job(methylartist_wgmeth_cmd, "methylartist_wgmeth",
@@ -313,7 +327,7 @@ def main():
 
 		dv_cmd=deepvariant_call_chr(bam,sample,ref,deepvariant,chromosome,model_type)
 		print(dv_cmd)
-		dv_job=Slurm(f"deepvariant_{chromosome}", {"account": account, "ntasks": "20","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+		dv_job=Slurm(f"deepvariant_{chromosome}", {"account": account, "ntasks": "18","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 		dv_jobs.append(dv_job.run(dv_cmd))
 	jobs+=dv_jobs
 

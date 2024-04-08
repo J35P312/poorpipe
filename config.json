@@ -8,6 +8,9 @@
 		"cnvpytor":{
 			"singularity":"singularity/cnvpytor_1.3.1--pyhdfd78af_1.sif"
 		},
+		"chopper":{
+			"singularity":"singularity/chopper_0.7.0--hdcf5f25_0.sif"
+		},
 		"deepvariant":{
 			"singularity":"singularity/deepvariant_latest.sif"
 		},
@@ -21,7 +24,7 @@
 		},
 		"vep":{
 			"singularity":"singularity/ensembl-vep_107.0--pl5321h4a94de4_0.sif",
-			"vep_snv":"--af_gnomadg --af_1kg --assembly GRCh37 --dir_cache /home/proj/development/rare-disease/ONT/analysis/poorpipe/references/ensembl-tools-release-107/cache/ --sift b --symbol --hgvs --clin_sig_allele 1 --polyphen b --merged --offline --plugin SpliceAI,snv=/home/proj/production/rare-disease/references/references_12.0/grch37_spliceai_scores_raw_snv_-v1.3-.vcf.gz,indel=/home/proj/production/rare-disease/references/references_12.0/grch37_spliceai_scores_raw_indel_-v1.3-.vcf.gz --plugin CADD,databases/whole_genome_SNVs.tsv.gz,databases/InDels.tsv.gz --plugin dbNSFP,/home/proj/production/rare-disease/references/references_12.0/grch37_dbnsfp_-v3.5a-.txt.gz,ALL --mirna --regulatory --gene_phenotype",
+			"vep_snv":"--af_1kg --assembly GRCh37 --dir_cache /home/proj/development/rare-disease/ONT/analysis/poorpipe/references/ensembl-tools-release-107/cache/ --sift b --symbol --hgvs --clin_sig_allele 1 --polyphen b --merged --offline --plugin SpliceAI,snv=/home/proj/production/rare-disease/references/references_12.0/grch37_spliceai_scores_raw_snv_-v1.3-.vcf.gz,indel=/home/proj/production/rare-disease/references/references_12.0/grch37_spliceai_scores_raw_indel_-v1.3-.vcf.gz --plugin CADD,databases/whole_genome_SNVs.tsv.gz,databases/InDels.tsv.gz --plugin dbNSFP,/home/proj/production/rare-disease/references/references_12.0/grch37_dbnsfp_-v3.5a-.txt.gz,ALL --mirna --regulatory --gene_phenotype --custom references/gnomad.genomes.r2.0.1.sites.noVEP.vcf.gz,gnomADg,vcf,exact,0,AF_POPMAX,AF",
 			"vep_sv":"--assembly GRCh37 --dir_cache /home/proj/development/rare-disease/ONT/analysis/poorpipe/references/ensembl-tools-release-107/cache/ --symbol --hgvs --merged --offline --max_sv_size 300000000 --per_gene --mirna --regulatory --gene_phenotype"
 		},
 		"vcf2cytosure":{
@@ -56,6 +59,10 @@
 		"methylartist":{
 			"singularity":"singularity/methylartist_1.2.11--pyhdfd78af_0.sif"
 		},
+		"paraphase":{
+			"singularity":"singularity/paraphase_3.0.0_build1.sif",
+			"genome":"37"
+		},
 		"minimap2":{
 			"singularity":"singularity/minimap2_2.26--he4a0461_2.sif"
 		},
@@ -77,9 +84,9 @@
 			"time":"1-00:00:00"
 		}
 	},
+
 	"singularity":{"options":"--bind /home/proj/"},
 	"reference":"//home/proj/development/rare-disease/ONT/analysis/poorpipe/references/human_g1k_v37.fasta"
-
 }
 
 
