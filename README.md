@@ -1,5 +1,5 @@
 # poorpipe
-poorly built nanopore pipeline. It performs alignment using Minimap2, SV calling using Sniffles and CNVpythor, expansion detection using TRGT, and SNV calling using Deepvariant.
+poorly built nanopore pipeline. It performs alignment using Minimap2, SV calling using Sniffles and CNVpythor, expansion detection using STRDust, and SNV calling using Clair3.
 The SNVs are phased using whatshap, and annotated using VEP.
 
 Command line:
@@ -12,7 +12,7 @@ ubam_folder is a folder containing bam files. The config is a json file, the fil
 The pipeline itself requires python 3 and slurmpy. 
 
 # Download
-TRGT file
+repeat file
 
 https://harrietdashnow.com/STRchive/data/hg19.STRchive-disease-loci.TRGT.bed
 

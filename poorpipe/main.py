@@ -26,7 +26,8 @@ sniffles    =f"{singularity_cmd} { config['tools']['sniffles']['singularity'] } 
 picard      =f"{singularity_cmd} { config['tools']['picard']['singularity'] } picard"
 pytor       =f"{singularity_cmd} { config['tools']['cnvpytor']['singularity'] } cnvpytor"
 cytosure    =f"{singularity_cmd} { config['tools']['vcf2cytosure']['singularity'] } vcf2cytosure"
-deepvariant =f"{singularity_cmd} { config['tools']['deepvariant']['singularity'] }"
+clair3 =f"{singularity_cmd} { config['tools']['clair3']['singularity'] } run_clair3.sh "
+hificnv = f"{singularity_cmd} { config['tools']['hificnv']['singularity'] } hificnv"
 bcftools    =f"{singularity_cmd} { config['tools']['bcftools']['singularity'] } bcftools"
 nanostats   =f"{singularity_cmd} { config['tools']['nanostats']['singularity'] } NanoStat"
 fastqc      =f"{singularity_cmd} { config['tools']['fastqc']['singularity'] } fastqc"
@@ -41,14 +42,18 @@ methylartist=f"{singularity_cmd} { config['tools']['methylartist']['singularity'
 paraphase=f"{singularity_cmd} { config['tools']['paraphase']['singularity']} paraphase"
 paraphase_genome=config['tools']['paraphase']['genome']
 
+cn_male =   config['tools']['hificnv']['cn_male']
+cn_female = config['tools']['hificnv']['cn_female']
+
+
 minimap2    =f"{singularity_cmd} { config['tools']['minimap2']['singularity']} minimap2"
 vcfsort     =f"{singularity_cmd} { config['tools']['vcftools']['singularity']} vcf-sort"
 genmod      =f"{singularity_cmd} { config['tools']['genmod']['singularity']} genmod"
 genmod_rank_model =config['tools']['genmod']["rank_model"]
 genmod_sv_rank_model =config['tools']['genmod']["sv_rank_model"]
 
-trgt=config["tools"]["trgt"]["binary"]
-trgt_repeats=config["tools"]["trgt"]["repeat_catalog"]
+strdust=f"{singularity_cmd} { config['tools']['strdust']['singularity'] } STRdust"
+strdust_repeats=config["tools"]["strdust"]["repeat_catalog"]
 
 vep="{} {} vep".format( singularity_cmd,config["tools"]["vep"]["singularity"] )
 filter_vep="{} {} filter_vep".format( singularity_cmd,config["tools"]["vep"]["singularity"] )
@@ -76,6 +81,18 @@ def paraphase_type(sample,ref,paraphase_genome,paraphase):
 	cmd=f"{paraphase} -b {sample}/{sample}.bam -r {ref} -o {sample}/paraphase --genome {paraphase_genome}"
 	return(cmd)
 
+def run_hificnv(sample,cn_male,cn_female,ref,hificnv):
+	cmd=f"""
+if grep -q male {sample}/{sample}.gender.txt; then
+	{hificnv} --bam {sample}/{sample}.bam --ref {ref} --output-prefix {sample}/{sample}.hificnv --threads 8 --maf {sample}/{sample}.pythor_snp.vcf.gz  --expected-cn {cn_male}
+else
+	{hificnv} --bam {sample}/{sample}.bam --ref {ref} --output-prefix {sample}/{sample}.hificnv --threads 8 --maf {sample}/{sample}.pythor_snp.vcf.gz  --expected-cn {cn_female}
+fi
+
+
+"""
+	return(cmd)
+
 def cytosure_cgh(sample,coverage_bed,sv_vcf,cytosure):
 
 	pytor_vcf=sv_vcf.replace(".vcf.gz","pytor.vcf")
@@ -87,11 +104,10 @@ sex==$(cat {sample}/{sample}.gender.txt)
 """
 	return(cmd)
 
-def target_type(bam,sample,ref,trgt_repeats,trgt,samtools):
-	cmd=f"""
-{samtools} view {bam} -bh -x MM -x ML >  {bam}.nometh.bam
-{samtools} index {bam}.nometh.bam
-{trgt} --genome {ref} --repeats {trgt_repeats} --reads {bam}.nometh.bam --output-prefix {sample}/{sample}.trgt"""
+def target_type(bam,sample,ref,strdust_repeats,strdust):
+
+	cmd=f"{strdust} --region-file {strdust_repeats} {ref} {bam} --sample {sample} > {sample}/{sample}.strdust.vcf"
+
 	return(cmd)
 
 def picard_qc(bam,sample,ref,picard):
@@ -110,16 +126,10 @@ def picard_gc(bam,sample,ref,picard,samtools):
 """
 	return(cmd)
 
-def deepvariant_call_chr(bam,sample,ref,deepvariant,chromosome,model_type):
-	cmd=f"""
-TMPDIR={sample}/tmp/
-{deepvariant} run_deepvariant --output_vcf {sample}/{sample}/dv.{chromosome}.vcf --model_type {model_type} --num_shards 16 --reads {bam} --ref {ref} --regions {chromosome} --intermediate_results_dir {sample}/tmp/{chromosome}"""
-	return(cmd)
-
 def bcftools_concat(sample,ref,bcftools):
 
 	bcftools_cmd=f"""
-{bcftools} concat {sample}/{sample}/dv.*vcf | grep -v RefCall | {bcftools} sort -O z - --temp-dir {sample}/tmp/ | {bcftools} norm -O z -f {ref} -m- - > {sample}/{sample}.vcf.gz
+{bcftools} concat {sample}/{sample}_clair3/merge_output.vcf.gz | {bcftools} sort -O z - --temp-dir {sample}/tmp/ | {bcftools} norm -O z -f {ref} -m- - > {sample}/{sample}.vcf.gz
 {bcftools} index {sample}/{sample}.vcf.gz
 {bcftools} view  {sample}/{sample}.vcf.gz -i "QUAL>20 & FORMAT/DP > 20 & FORMAT/GQ > 10" > {sample}/{sample}.pytor.vcf.gz
 
@@ -128,6 +138,12 @@ def bcftools_concat(sample,ref,bcftools):
 	
 """
 	return(bcftools_cmd)
+
+def run_clair3(bam,sample,ref,model,platform,clair3):
+	cmd=f"""
+{clair3} --output={sample}/{sample}_clair3 --sample_name={sample} --bam_fn={bam} --ref_fn {ref} --threads 18 -m {model} --platform {platform}
+	"""
+	return(cmd)
 
 def whatshap_phase(bam,sample,ref,bcftools,whatshap):
 	cmd=f"""
@@ -161,6 +177,7 @@ def vep_annotation(sample,in_vcf,out_vcf,vep,vep_options,bcftools,bgzip):
 """
 	return(cmd)
 
+
 def genmod_rank_snv(in_vcf,out_vcf,sample,family,filter_vep,bcftools,genmod_rank_model,genmod,bgzip):
 
 	filter_vep_vcf=in_vcf.replace(".vcf.gz",".filter_vep.vcf")
@@ -168,7 +185,7 @@ def genmod_rank_snv(in_vcf,out_vcf,sample,family,filter_vep,bcftools,genmod_rank
 	genmod_models_vcf=in_vcf.replace(".vcf.gz",".genmod_models.vcf")
 
 	cmd=f"""
-{bcftools} view -e 'FMT/GQ < 10 | FMT/AD < 3 | INFO/AF > 0.05' {in_vcf} -o {bcftools_quality}
+{bcftools} view -e 'FMT/GQ < 5 | FMT/DP < 5 | FORMAT/AF < 0.05' {in_vcf} | {bcftools} +split-vep -c AF:Float -e 'AF>0.2' -O z - > {bcftools_quality}
 {genmod} annotate {bcftools_quality} --annotate_regions | {genmod} models - -f {sample}/{family}.fam  -t ped -p 10 -o {genmod_models_vcf}
 {genmod} score -f {sample}/{family}.fam -t ped -c {genmod_rank_model} -r {genmod_models_vcf} -o {out_vcf}
 
@@ -213,11 +230,16 @@ def get_chromosomes(fai):
 
 	return(chromosomes)
 
-def finnish(sample,status,jobs):
+def finnish(sample,to_remove,status,jobs):
 	j=",".join(list(map(str,jobs)))
+
+	rm="\nrm -rf ".join(to_remove)
+	if to_remove:
+		rm+= "rm -rf "
 
 	cmd=f"""
 sacct --format=jobid,jobname%50,account,partition,alloccpus,TotalCPU,elapsed,start,end,state,exitcode --jobs {j} | perl -nae 'my @headers=(jobid,jobname,account,partition,alloccpus,TotalCPU,elapsed,start,end,state,exitcode); if($. == 1) {{ print q{{#}} . join(qq{{\\t}}, @headers), qq{{\\n}} }} if ($. >= 3 && $F[0] !~ /( .batch | .bat+ )\\b/xms) {{ print join(qq{{\\t}}, @F), qq{{\\n}} }}' > {status}
+{rm}
 """
 	return(cmd)
 
@@ -243,11 +265,32 @@ def main():
 		os.system(f"mkdir {sample}")
 		os.system(f"mkdir {sample}/{sample}")
 		os.system(f"mkdir {sample}/logs")
+		try:
+			os.system(f"rm {sample}/logs/*")
+		except:
+			pass
+
+
 		os.system(f"mkdir {sample}/whatshap")
 		os.system(f"mkdir {sample}/scripts")
+
+		try:
+			os.system(f"rm {sample}/scripts/*")
+		except:
+			pass
+
 		os.system(f"mkdir {sample}/fastq")
 		os.system(f"mkdir {sample}/tmp")
 		os.system(f"mkdir {sample}/pytor")
+		try:
+			os.system(f"rm {sample}/fail")
+		except:
+			pass
+		try:
+			os.system(f"rm {sample}/complete")
+		except:
+			pass
+
 
 	except:
 		pass
@@ -308,34 +351,22 @@ def main():
 	pytor_job_id=pytor_job.run(pytor_cmd)
 	jobs.append(pytor_job_id)
 
+	if method == "ont":
+		clair3_platform="ont"
+		clair3_model=config['tools']['clair3']['ont_model']
+	else:
+		clair3_platform="hifi"
+		clair3_model="/opt/models/hifi_revio"
 
-	trgt_cmd=target_type(bam,sample,ref,trgt_repeats,trgt,samtools)
-	print(trgt_cmd)
-	trgt_job=Slurm("trgt", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
-	trgt_job_id=trgt_job.run(trgt_cmd)
-	jobs.append(trgt_job_id)
-
-
-	dv_jobs=[]
-	chromosomes=list(range(1,23))+["X","Y","MT"]
-	for chromosome in chromosomes:
-
-		if method == "ont":
-			model_type="ONT_R104"
-		else:
-			model_type="PACBIO"
-
-		dv_cmd=deepvariant_call_chr(bam,sample,ref,deepvariant,chromosome,model_type)
-		print(dv_cmd)
-		dv_job=Slurm(f"deepvariant_{chromosome}", {"account": account, "ntasks": "18","time":"1-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
-		dv_jobs.append(dv_job.run(dv_cmd))
-	jobs+=dv_jobs
+	clair3_cmd=run_clair3(bam,sample,ref,clair3_model,clair3_platform,clair3)
+	clair3_job=Slurm(f"clair3", {"account": account, "ntasks": "18","time":"2-00:00:00","dependency":f"afterok:{align_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	clair3_job_id=clair3_job.run(clair3_cmd)
+	jobs.append(clair3_job_id)
 
 	bcftools_cmd=bcftools_concat(sample,ref,bcftools)
 	print(bcftools_cmd)
 
-	dv_jobs=":".join(map(str,dv_jobs))
-	bcftools_concat_job=Slurm("concat", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{dv_jobs}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	bcftools_concat_job=Slurm("concat", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{clair3_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	bcftools_concat_job_id=bcftools_concat_job.run(bcftools_cmd)
 	jobs.append(bcftools_concat_job_id)
 
@@ -344,6 +375,10 @@ def main():
 	pytor_baf_job_id=pytor_baf_job.run(pytor_baf_cmd)
 	jobs.append(pytor_baf_job_id)
 
+	hificnv_cmd=run_hificnv(sample,cn_male,cn_female,ref,hificnv)
+	hificnv_job=Slurm("hificnv", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{bcftools_concat_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	hificnv_job_id=hificnv_job.run(hificnv_cmd)
+	jobs.append(hificnv_job_id)
 
 	svdb_merge_cmd=svdb_merge(f"{sample}/{sample}.pytor.vcf",f"{sample}/{sample}.snf.vcf",svdb,sample)
 	svdb_merge_job=Slurm("svdb_merge", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{pytor_job_id}:{sniffles_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
@@ -385,6 +420,12 @@ def main():
 	whatshap_haplotag_job_id=whatshap_haplotag_job.run(whatshap_haplotag_cmd)
 	jobs.append(whatshap_haplotag_job_id)
 
+	strdust_cmd=target_type(f"{sample}/{sample}.happlotagged.bam",sample,ref,strdust_repeats,strdust)
+	print(strdust_cmd)
+	strdust_job=Slurm("strdust", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{whatshap_haplotag_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	strdust_job_id=strdust_job.run(strdust_cmd)
+	jobs.append(strdust_job_id)
+
 	methylartist_wgmeth_phased_cmd=methylartist_wgmeth_phased(f"{sample}/{sample}.happlotagged.bam",ref,methylartist,16)
 	methylartist_wgmeth_phased_job_id=submit_job(methylartist_wgmeth_phased_cmd, "methylartist_wgmeth",
 	{"account": account, "ntasks": processes['methylartist_wgmeth']['cores'],"time":processes['methylartist_wgmeth']['time'],"dependency":f"afterok:{whatshap_haplotag_job_id}" },sample)
@@ -408,19 +449,22 @@ def main():
 
 	multiqc_cmd=multiqc_collect(sample,multiqc)
 	print(multiqc_cmd)
-	multiqc_job=Slurm("multiqc", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{whatshap_phase_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	multiqc_job=Slurm("multiqc", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{whatshap_phase_job_id}:{nanostats_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	multiqc_job_id=multiqc_job.run(multiqc_cmd)
 	jobs.append(multiqc_job_id)
 
-	complete_cmd=finnish(sample,f"{sample}/complete",jobs)
-	complete_job=Slurm(f"complete-{sample}", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afterok:{multiqc_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	to_remove=[f"{sample}/tmp",f"{sample}/fastq",f"{sample}/{sample}.fastq.gz",f"{sample}/{sample}.bam.nometh.bam"]
+
+	all_jobs=":".join(list(map(str,jobs)))
+	complete_cmd=finnish(sample,to_remove,f"{sample}/complete",jobs)
+	complete_job=Slurm(f"complete-{sample}", {"account": account, "ntasks": "1","time":"00:10:00","dependency":f"afterok:{all_jobs}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	complete_job_id=complete_job.run(complete_cmd)
 
-	fail_cmd=finnish(sample,f"{sample}/fail",jobs)
-	fail_job=Slurm(f"fail-{sample}", {"account": account, "ntasks": "1","time":"1-00:00:00","dependency":f"afternotok:{multiqc_job_id}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
+	fail_cmd=finnish(sample,to_remove,f"{sample}/fail",jobs)
+	fail_job=Slurm(f"fail-{sample}", {"account": account, "ntasks": "1","time":"00:10:00","dependency":f"afternotok:{all_jobs}"},log_dir=f"{sample}/logs",scripts_dir=f"{sample}/scripts")
 	fail_job_id=fail_job.run(fail_cmd)
 
 	time.sleep(10)
-	os.system(finnish(sample,f"{sample}/submitted",jobs))
+	os.system(finnish(sample,[],f"{sample}/submitted",jobs))
 
 main()

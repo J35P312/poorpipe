@@ -11,8 +11,9 @@
 		"chopper":{
 			"singularity":"singularity/chopper_0.7.0--hdcf5f25_0.sif"
 		},
-		"deepvariant":{
-			"singularity":"singularity/deepvariant_latest.sif"
+		"clair3":{
+			"singularity":"singularity/clair3_latest.sif",
+			"ont_model":"/home/proj/development/rare-disease/ONT/analysis/poorpipe/r1041_e82_400bps_hac_v430/"
 		},
 		"fastqc":{
 			"singularity":"singularity/fastqc_0.12.1--hdfd78af_0.sif"
@@ -21,6 +22,12 @@
 			"singularity": "singularity/genmod_3.7.4--pyh5e36f6f_0.sif",
 			"rank_model":"genmod/rank_model_-v1.36-.ini",
 			"sv_rank_model":"poorpipe/svrank_model_-v1.9-.ini"
+		},
+		"hificnv":{
+			"singularity": "singularity/hificnv_1.0.0--h9ee0642_0.sif",
+			"cn_male":"references/expected_cn.hg19.XY.bed",
+			"cn_female":"references/expected_cn.hg19.XX.bed"
+
 		},
 		"vep":{
 			"singularity":"singularity/ensembl-vep_107.0--pl5321h4a94de4_0.sif",
@@ -52,8 +59,8 @@
 		"tiddit":{
 			"singularity":"singularity/tiddit_3.6.1--py38h24c8ff8_0.sif"
 		},
-		"trgt":{
-			"binary":"./singularity/trgt-v0.7.0-linux_x86_64",
+		"strdust":{
+			"singularity":"singularity/strdust_0.8.0--h5c23e0d_0.sif",
 			"repeat_catalog":"hg19.STRchive-disease-loci.TRGT.bed"
 			},
 		"methylartist":{
